@@ -2170,6 +2170,14 @@ func cmdSessionKill(args []string, stdout, stderr io.Writer, jsonOutput ...bool)
 		return 1
 	}
 
+	if bead, err := store.Get(sessionID); err != nil {
+		fmt.Fprintf(stderr, "gc session kill: warning: loading session %s for circuit breaker clear: %v\n", sessionID, err) //nolint:errcheck // best-effort stderr
+	} else if identity := namedSessionIdentity(bead); identity != "" {
+		if err := resetSessionCircuitBreakerOnController(cityPath, sessionID, identity); err != nil {
+			fmt.Fprintf(stderr, "gc session kill: warning: clearing session circuit breaker for %q: %v\n", identity, err) //nolint:errcheck // best-effort stderr
+		}
+	}
+
 	// Use the resolved session ID as the canonical Subject for event
 	// consumers. This ensures a stable key regardless of how the user
 	// specified the target (session ID or alias).

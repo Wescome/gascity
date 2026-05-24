@@ -88,7 +88,10 @@ func NewProviderWithConfig(cfg Config) (*Provider, error) {
 	}
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		// No client-level Timeout: context timeouts in doURL govern each
+		// request. A client-level timeout would override the longer
+		// startTimeout used by Start, causing cold-sandbox boot to fail.
+		client = &http.Client{}
 	}
 
 	return &Provider{

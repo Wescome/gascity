@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -110,7 +111,15 @@ func NewProviderWithConfig(cfg Config) (*Provider, error) {
 // Start creates a new remote session. Maps to POST /session.
 func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) error {
 	body := startRequest{SessionID: name, Config: startConfigFromRuntime(cfg)}
-	return p.do(ctx, p.startTimeout, http.MethodPost, []string{"session"}, body, nil)
+	err := p.do(ctx, p.startTimeout, http.MethodPost, []string{"session"}, body, nil)
+	if err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+		// A timed-out or cancelled start does not mean the session failed: the
+		// Sandbox may still be booting. Surface ErrSessionInitializing so the
+		// reconciler retries on the next tick instead of rolling back the
+		// pending create.
+		return fmt.Errorf("%w: cloudflare runtime start %q: %v", runtime.ErrSessionInitializing, name, err)
+	}
+	return err
 }
 
 // Stop destroys the named remote session. Missing sessions are treated as
@@ -368,6 +377,12 @@ func cloudflareStatusError(status int, target string, data []byte) error {
 		return fmt.Errorf("%w: cloudflare runtime %s: %s", runtime.ErrSessionNotFound, target, msg)
 	case http.StatusConflict:
 		return fmt.Errorf("%w: cloudflare runtime %s: %s", runtime.ErrSessionExists, target, msg)
+	case http.StatusServiceUnavailable:
+		// 503 sandbox_timeout: the Worker's Sandbox boot poll exhausted. The
+		// Sandbox may still be booting, so this is retryable — surface
+		// ErrSessionInitializing so the reconciler backs off instead of
+		// rolling back the pending create.
+		return fmt.Errorf("%w: cloudflare runtime %s: %s", runtime.ErrSessionInitializing, target, msg)
 	default:
 		return fmt.Errorf("cloudflare runtime %s: status %d: %s", target, status, msg)
 	}

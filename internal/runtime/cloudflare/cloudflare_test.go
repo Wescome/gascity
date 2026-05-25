@@ -640,3 +640,361 @@ func TestCapabilitiesReflectsConfig(t *testing.T) {
 		t.Fatal("CanReportAttachment = true, want always false")
 	}
 }
+
+func TestNewProviderFromEnv(t *testing.T) {
+	t.Setenv("GC_CLOUDFLARE_RUNTIME_URL", "http://example.cloudflare.workers.dev")
+	t.Setenv("GC_CLOUDFLARE_RUNTIME_TOKEN", "")
+
+	p, err := NewProvider()
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	if p == nil {
+		t.Fatal("NewProvider returned nil")
+	}
+}
+
+func TestAttachReturnsError(t *testing.T) {
+	p, err := NewProviderWithConfig(Config{Endpoint: "http://unused.example"})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+	if err := p.Attach("any"); err == nil {
+		t.Fatal("Attach = nil, want error")
+	}
+}
+
+func TestStartSurfacesErrSessionInitializingOn503(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"sandbox_timeout"}`))
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	err = p.Start(context.Background(), "sess-one", runtime.Config{})
+	if !errors.Is(err, runtime.ErrSessionInitializing) {
+		t.Fatalf("Start 503 error = %v, want ErrSessionInitializing", err)
+	}
+}
+
+func TestStartSurfacesErrSessionInitializingOnContextDeadline(t *testing.T) {
+	block := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-block:
+		case <-r.Context().Done():
+		}
+	}))
+	defer func() { close(block); server.Close() }()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	err = p.Start(ctx, "sess-one", runtime.Config{})
+	if !errors.Is(err, runtime.ErrSessionInitializing) {
+		t.Fatalf("Start deadline error = %v, want ErrSessionInitializing", err)
+	}
+}
+
+func TestStartNilContextUsesBackground(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	//nolint:staticcheck
+	if err := p.Start(nil, "sess-one", runtime.Config{}); err != nil {
+		t.Fatalf("Start with nil context: %v", err)
+	}
+}
+
+func TestProcessAliveEmptyNamesReturnsTrue(t *testing.T) {
+	p, err := NewProviderWithConfig(Config{Endpoint: "http://unused.example"})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+	if !p.ProcessAlive("sess-one", nil) {
+		t.Fatal("ProcessAlive with empty names = false, want true")
+	}
+}
+
+func TestGetLastActivityEmptyCreatedAt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"alive":true}`))
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	got, err := p.GetLastActivity("sess-one")
+	if err != nil {
+		t.Fatalf("GetLastActivity: %v", err)
+	}
+	if !got.IsZero() {
+		t.Fatalf("last activity = %s, want zero time for empty createdAt", got)
+	}
+}
+
+func TestGetLastActivityMalformedTimestamp(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"alive":true,"record":{"createdAt":"not-a-timestamp"}}`))
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if _, err := p.GetLastActivity("sess-one"); err == nil {
+		t.Fatal("GetLastActivity: want error for malformed timestamp, got nil")
+	}
+}
+
+func TestStopPropagatesError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"internal error"}`))
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if err := p.Stop("sess-one"); err == nil {
+		t.Fatal("Stop: want error on 500, got nil")
+	}
+}
+
+func TestIsRunningReturnsFalseOnHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if p.IsRunning("sess-one") {
+		t.Fatal("IsRunning = true, want false on HTTP error")
+	}
+}
+
+func TestGetMetaPropagatesError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if _, err := p.GetMeta("sess-one", "mykey"); err == nil {
+		t.Fatal("GetMeta: want error on 500, got nil")
+	}
+}
+
+func TestRemoveMetaPropagatesError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if err := p.RemoveMeta("sess-one", "mykey"); err == nil {
+		t.Fatal("RemoveMeta: want error on 500, got nil")
+	}
+}
+
+func TestPeekPropagatesError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if _, err := p.Peek("sess-one", 10); err == nil {
+		t.Fatal("Peek: want error on 500, got nil")
+	}
+}
+
+func TestClearScrollbackPropagatesError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if err := p.ClearScrollback("sess-one"); err == nil {
+		t.Fatal("ClearScrollback: want error on 500, got nil")
+	}
+}
+
+func TestSendKeysPropagatesError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if err := p.SendKeys("sess-one", "Enter"); err == nil {
+		t.Fatal("SendKeys: want error on 500, got nil")
+	}
+}
+
+func TestStatusTextUsesMessageField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"from message field"}`))
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	err = p.Stop("sess-one")
+	if err == nil || !strings.Contains(err.Error(), "from message field") {
+		t.Fatalf("error = %v, want message field text in error", err)
+	}
+}
+
+func TestStatusTextFallsBackToHTTPStatusText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	err = p.Stop("sess-one")
+	if err == nil || !strings.Contains(err.Error(), "Internal Server Error") {
+		t.Fatalf("error = %v, want http.StatusText fallback in error", err)
+	}
+}
+
+func TestStatusTextNonJSONBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("plain text error"))
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	err = p.Stop("sess-one")
+	if err == nil || !strings.Contains(err.Error(), "plain text error") {
+		t.Fatalf("error = %v, want raw non-JSON body in error", err)
+	}
+}
+
+func TestProcessAliveReturnsFalseOnExecError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if p.ProcessAlive("sess-one", []string{"codex"}) {
+		t.Fatal("ProcessAlive = true, want false when exec returns HTTP error")
+	}
+}
+
+func TestGetLastActivityPropagatesError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if _, err := p.GetLastActivity("sess-one"); err == nil {
+		t.Fatal("GetLastActivity: want error on 500, got nil")
+	}
+}
+
+func TestClearScrollbackTreatsNotFoundAsIdempotent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if err := p.ClearScrollback("gone"); err != nil {
+		t.Fatalf("ClearScrollback missing session: %v", err)
+	}
+}
+
+func TestSendKeysTreatsNotFoundAsIdempotent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	p, err := NewProviderWithConfig(Config{Endpoint: server.URL})
+	if err != nil {
+		t.Fatalf("NewProviderWithConfig: %v", err)
+	}
+
+	if err := p.SendKeys("gone", "Enter"); err != nil {
+		t.Fatalf("SendKeys missing session: %v", err)
+	}
+}

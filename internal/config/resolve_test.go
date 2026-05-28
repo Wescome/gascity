@@ -1976,6 +1976,9 @@ func TestMergeProviderOverBuiltinFieldSync(t *testing.T) {
 		TitleModel:             "haiku",
 		ACPCommand:             "custom-acp",
 		ACPArgs:                []string{"acp-mode"},
+		URL:                    "https://ff-pipeline.koales.workers.dev",
+		HarnessSlots:           []string{"E", "T", "C", "S", "L", "V", "G", "P"},
+		CapabilityKeys:         []string{"ai_reasoning"},
 	}
 
 	// Verify every field on city is non-zero (catches new fields not added to test data).

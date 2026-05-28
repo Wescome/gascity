@@ -150,6 +150,27 @@ type ProviderSpec struct {
 	// ACPArgs overrides Args when the session transport is ACP.
 	// When nil, Args is used for both tmux and ACP transports.
 	ACPArgs []string `toml:"acp_args,omitempty"`
+	// URL is the endpoint a Gas City harness runtime provider calls
+	// (IS-GC-RUNTIME-PROVIDER-CONTRACT). For pi-rpc it is the ff-pipeline Worker
+	// base URL; for cloudflare-sandbox it is the M0 control worker URL. Only read
+	// for [provider.*] (singular) harness-registry blocks.
+	URL string `toml:"url,omitempty"`
+	// HarnessSlots is the Harness Tuple coverage declaration for this provider
+	// (IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG4). It MUST contain all eight slots
+	// ["E","T","C","S","L","V","G","P"] for the provider to register as a Gas
+	// City harness runtime provider; a provider whose slots are incomplete is
+	// rejected at registration (incomplete_harness_tuple). The gate is a config
+	// read, not a runtime probe.
+	HarnessSlots []string `toml:"harness_slots,omitempty"`
+	// CapabilityKeys is the provider's declared capability key set
+	// (IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG1/AC-REG5). Every value MUST be
+	// drawn from the canonical twelve-key set settled in Open Question 4
+	// (ai_reasoning, model_routing, workspace_write_scope, command_exec,
+	// file_materialize, workspace_init, dependency_prep, session_archive,
+	// snapshot_restore, contract_evaluation, tool_capability_probe,
+	// backup_restore). The registry matches a step's runtime_requirements
+	// against this set during selection.
+	CapabilityKeys []string `toml:"capability_keys,omitempty"`
 }
 
 // Reserved prefixes for the Base field.

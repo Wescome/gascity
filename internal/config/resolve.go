@@ -352,6 +352,18 @@ func MergeProviderOverBuiltin(base, city ProviderSpec) ProviderSpec {
 		result.OptionDefaults = merged
 	}
 
+	// Harness runtime provider fields (IS-GC-RUNTIME-PROVIDER-CONTRACT).
+	// URL is a scalar override; the slot/key lists replace entirely when set.
+	if city.URL != "" {
+		result.URL = city.URL
+	}
+	if city.HarnessSlots != nil {
+		result.HarnessSlots = city.HarnessSlots
+	}
+	if city.CapabilityKeys != nil {
+		result.CapabilityKeys = city.CapabilityKeys
+	}
+
 	return result
 }
 

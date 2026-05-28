@@ -463,6 +463,13 @@ func TestProviderFieldSync(t *testing.T) {
 		"SessionIDFlag":          "internal session-id config, not patched",
 		"PrintArgs":              "internal print-mode args, not patched",
 		"TitleModel":             "internal title-model key, not patched",
+		// Harness runtime provider registry fields (IS-GC-RUNTIME-PROVIDER-CONTRACT).
+		// These configure the high-level [provider.*] HarnessProvider registry,
+		// not agent-startup presets; they are not patched via the agent override
+		// path. Merged via MergeProviderOverBuiltin, read by HarnessProviderBlocks.
+		"URL":            "harness registry provider endpoint, not patched",
+		"HarnessSlots":   "harness tuple declaration, registry-only, not patched",
+		"CapabilityKeys": "harness capability declaration, registry-only, not patched",
 	}
 
 	// Fields on ProviderPatch that don't map 1:1 to ProviderSpec.

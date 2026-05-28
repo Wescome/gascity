@@ -168,6 +168,14 @@ type City struct {
 	Workspace Workspace `toml:"workspace"`
 	// Providers defines named provider presets for agent startup.
 	Providers map[string]ProviderSpec `toml:"providers,omitempty"`
+	// Provider defines the Gas City harness runtime provider registry
+	// (IS-GC-RUNTIME-PROVIDER-CONTRACT, Open Question 3: the registry lives in
+	// city configuration). Each [provider.<id>] block declares a harness runtime
+	// provider's URL, harness_slots, and capability_keys. This is distinct from
+	// [providers.*] (plural), which configures low-level session-provider startup
+	// presets; [provider.*] (singular) configures the high-level HarnessProvider
+	// registry consumed during Formula step provider selection.
+	Provider map[string]ProviderSpec `toml:"provider,omitempty"`
 	// Packs defines named remote pack sources fetched via git (V1 mechanism).
 	Packs map[string]PackSource `toml:"packs,omitempty"`
 	// Imports defines named pack imports (V2 mechanism). Each key is a

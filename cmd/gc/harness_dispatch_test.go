@@ -107,6 +107,10 @@ func TestMaybeDispatchHarnessSkipsBeadWithoutRequirements(t *testing.T) {
 // A step whose requirements are satisfied selects the provider and runs
 // ExecuteStep with the populated request envelope.
 func TestMaybeDispatchHarnessSelectsProviderAndExecutes(t *testing.T) {
+	// A successful provider execution now flows into the fidelity validator;
+	// point it at a fake release driver that POSTs RELEASE (exit 0) so this test
+	// exercises only the selection + execution path.
+	writeFakeFidelityScript(t, 0)
 	store := beads.NewMemStore()
 	cfg, provider, cleanup := seedHarnessRegistry(t, "pi-rpc", []string{"ai_reasoning", "model_routing", "command_exec"}, 1)
 	defer cleanup()

@@ -178,11 +178,16 @@ func maybeDispatchHarness(ctx context.Context, store beads.Store, bead beads.Bea
 		return harnessDispatchOutcome{Attempted: true, Selected: providerID}, fmt.Errorf("harness dispatch bead=%s provider=%s: %w", bead.ID, providerID, execErr)
 	}
 
-	// The fidelity-validator integration is a separate PR. For now, surface the
-	// provider verdict so the dispatch is observable end-to-end and record the
-	// selected provider on the bead for replay-identity.
+	// Record the selected provider and status on the bead for replay-identity,
+	// then feed the provider response into the fidelity validator. The validator
+	// is the molecule verdict (release / revise / fail-closed); the provider
+	// status is only an execution signal (AC-RS2).
 	_, _ = fmt.Fprintf(stderr, "harness dispatch: bead=%s provider=%s status=%s\n", bead.ID, providerID, resp.Status)
 	recordHarnessSelection(store, bead.ID, providerID, resp)
+
+	if fidErr := runFidelityValidator(ctx, store, bead, cfg, cityPath, resp, stderr); fidErr != nil {
+		return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, fmt.Errorf("harness dispatch bead=%s provider=%s: %w", bead.ID, providerID, fidErr)
+	}
 
 	return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, nil
 }

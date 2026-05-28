@@ -1,0 +1,300 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"time"
+
+	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/harness"
+)
+
+// fidelityReleaseScriptPath is the in-container path to the deployed fidelity
+// release driver. It is a package var (not a const) so tests can point it at a
+// fake script; production always runs the deployed script.
+var fidelityReleaseScriptPath = "/data/cities/factory/fidelity/fidelity-release.sh"
+
+// defaultFidelityMaxAmendmentDepth is the convergence ceiling used when a bead
+// carries no gc.max_iterations metadata.
+const defaultFidelityMaxAmendmentDepth = 5
+
+// defaultFidelityWebhookKeyID is the HMAC key id used when a bead carries no
+// gc.ff_webhook_hmac_keyid metadata.
+const defaultFidelityWebhookKeyID = "v1"
+
+// Fidelity validator verdicts, surfaced to the caller so it can re-enter the
+// molecule (revise) or stop (fail-closed). The bead itself is closed/POSTed by
+// the fidelity-release driver, not by Gas City — these errors are the signal,
+// not the action.
+var (
+	// ErrFidelityRevise reports the fidelity validator returned exit 10: the
+	// molecule must re-enter at the Code step.
+	ErrFidelityRevise = errors.New("fidelity validation: revise")
+	// ErrFidelityFailClosed reports the fidelity validator returned exit 20 (or
+	// any other non-zero, non-revise exit): the molecule.failed event has been
+	// POSTed and the step fails closed.
+	ErrFidelityFailClosed = errors.New("fidelity validation: fail-closed")
+)
+
+// fidelity-release.sh exit codes (IS-GC-FIDELITY-VALIDATION release step).
+const (
+	fidelityExitRelease    = 0  // RELEASE POSTed + accepted; bead closed by driver.
+	fidelityExitRevise     = 10 // Molecule re-enters at the Code step.
+	fidelityExitFailClosed = 20 // molecule.failed POSTed; fail closed.
+)
+
+// fidelityLineage is the lineage block of the fidelity job. factory_attempt is
+// a bare JSON integer (not a string) per the release step contract.
+type fidelityLineage struct {
+	FnID           string `json:"fn_id"`
+	IsID           string `json:"is_id"`
+	EsID           string `json:"es_id"`
+	EpID           string `json:"ep_id"`
+	FormID         string `json:"form_id"`
+	FactoryAttempt int    `json:"factory_attempt"`
+	BeadID         string `json:"bead_id"`
+}
+
+// fidelityResponse mirrors the provider ExecutionResponse fields the release
+// step reads. PolicyEvents is a non-nil slice so it serializes as [] not null.
+type fidelityResponse struct {
+	Status                           harness.ProviderStatus  `json:"status"`
+	ProviderVerdict                  harness.ProviderVerdict `json:"provider_verdict"`
+	Artifacts                        []harness.Artifact      `json:"artifacts"`
+	ArtifactManifest                 []harness.ManifestEntry `json:"artifact_manifest"`
+	PolicyEvents                     []harness.PolicyEvent   `json:"policy_events"`
+	ModelUsage                       *harness.ModelUsage     `json:"model_usage"`
+	RuntimeIdentity                  harness.RuntimeIdentity `json:"runtime_identity"`
+	SessionArchiveRef                string                  `json:"session_archive_ref"`
+	VerifierReportRef                string                  `json:"verifier_report_ref"`
+	Error                            *harness.ProviderError  `json:"error"`
+	CompletionClaimedWithoutManifest bool                    `json:"completion_claimed_without_manifest"`
+	StepOutputs                      map[string]any          `json:"step_outputs"`
+}
+
+// fidelityConvergence carries the amendment ceiling.
+type fidelityConvergence struct {
+	MaxAmendmentDepth int `json:"max_amendment_depth"`
+}
+
+// fidelityWebhook carries the FF webhook wiring. hmac_secret is sourced from
+// the environment ($GAS_CITY_HMAC_SECRET) by the script, not embedded here.
+type fidelityWebhook struct {
+	URL        string `json:"url"`
+	HMACSecret string `json:"hmac_secret"`
+	KeyID      string `json:"key_id"`
+}
+
+// fidelityJob is the complete $RIG_ROOT/fidelity-job.json document.
+type fidelityJob struct {
+	StepName          string              `json:"step_name"`
+	IsReleaseStep     bool                `json:"is_release_step"`
+	Lineage           fidelityLineage     `json:"lineage"`
+	DeclaredOutputs   []string            `json:"declared_outputs"`
+	PriorStepVerdicts []any               `json:"prior_step_verdicts"`
+	Response          fidelityResponse    `json:"response"`
+	Convergence       fidelityConvergence `json:"convergence"`
+	Webhook           fidelityWebhook     `json:"webhook"`
+}
+
+// runFidelityValidator feeds the provider ExecutionResponse into the deployed
+// fidelity release driver. It writes $RIG_ROOT/fidelity-job.json, runs
+// fidelity-release.sh under the dispatch context, and maps the script's exit
+// code onto the molecule lifecycle:
+//
+//	0  -> RELEASE POSTed + accepted; the driver closed the bead. Returns nil.
+//	10 -> Revise; stamps gc.harness_fidelity_verdict=revise, returns ErrFidelityRevise.
+//	20 -> Fail-closed; stamps gc.harness_fidelity_verdict=fail_closed, returns ErrFidelityFailClosed.
+//	*  -> Any other non-zero exit is treated as fail-closed.
+//
+// The fidelity verdict is the molecule verdict, distinct from the provider
+// status (AC-RS2): the provider says "I ran", fidelity says "release / revise /
+// fail".
+func runFidelityValidator(ctx context.Context, store beads.Store, bead beads.Bead, cfg *config.City, cityPath string, resp harness.ExecutionResponse, stderr io.Writer) error {
+	rigRoot := fidelityRigRoot(bead, cityPath)
+
+	job := buildFidelityJob(bead, resp)
+	if err := writeFidelityJob(rigRoot, job); err != nil {
+		return fmt.Errorf("fidelity job bead=%s: %w", bead.ID, err)
+	}
+
+	cmd := exec.CommandContext(ctx, "bash", fidelityReleaseScriptPath)
+	cmd.Env = append(os.Environ(),
+		"GC_BEAD_ID="+bead.ID,
+		"FN_ID="+bead.Metadata["gc.fn_id"],
+		"RIG_ROOT="+rigRoot,
+		"FF_WEBHOOK_URL="+bead.Metadata["gc.ff_webhook_url"],
+		"FF_WEBHOOK_HMAC_KEYID="+webhookHmacKeyid(bead),
+		// GAS_CITY_HMAC_SECRET is inherited from os.Environ() so the secret is
+		// never read or echoed by Gas City.
+	)
+	cmd.Stdout = stderr
+	cmd.Stderr = stderr
+
+	runErr := cmd.Run()
+	exitCode := fidelityExitCode(runErr)
+
+	switch exitCode {
+	case fidelityExitRelease:
+		// RELEASE was POSTed and accepted; the driver already closed the bead.
+		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=release\n", bead.ID)
+		return nil
+	case fidelityExitRevise:
+		recordFidelityVerdict(store, bead.ID, "revise", stderr)
+		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=revise\n", bead.ID)
+		return ErrFidelityRevise
+	case fidelityExitFailClosed:
+		recordFidelityVerdict(store, bead.ID, "fail_closed", stderr)
+		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=fail_closed\n", bead.ID)
+		return ErrFidelityFailClosed
+	default:
+		// Any other non-zero exit is treated as fail-closed: the validator did
+		// not give us a clean release or a structured revise, so we must not
+		// proceed as if the step succeeded.
+		recordFidelityVerdict(store, bead.ID, "fail_closed", stderr)
+		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=fail_closed (unexpected exit=%d)\n", bead.ID, exitCode)
+		return fmt.Errorf("%w: fidelity-release.sh exit=%d", ErrFidelityFailClosed, exitCode)
+	}
+}
+
+// fidelityRigRoot resolves the rig root from bead metadata, falling back to
+// cityPath/rigs/<formula_id> when gc.rig_root is absent.
+func fidelityRigRoot(bead beads.Bead, cityPath string) string {
+	if root := bead.Metadata["gc.rig_root"]; root != "" {
+		return root
+	}
+	return filepath.Join(cityPath, "rigs", bead.Metadata["gc.formula_id"])
+}
+
+// buildFidelityJob assembles the fidelity job document from bead lineage
+// metadata and the provider response.
+func buildFidelityJob(bead beads.Bead, resp harness.ExecutionResponse) fidelityJob {
+	return fidelityJob{
+		StepName:      "release",
+		IsReleaseStep: true,
+		Lineage: fidelityLineage{
+			FnID:           bead.Metadata["gc.fn_id"],
+			IsID:           bead.Metadata["gc.is_id"],
+			EsID:           bead.Metadata["gc.es_id"],
+			EpID:           bead.Metadata["gc.ep_id"],
+			FormID:         bead.Metadata["gc.form_id"],
+			FactoryAttempt: fidelityFactoryAttempt(bead),
+			BeadID:         bead.ID,
+		},
+		DeclaredOutputs:   []string{},
+		PriorStepVerdicts: []any{},
+		Response:          fidelityResponseFrom(resp),
+		Convergence: fidelityConvergence{
+			MaxAmendmentDepth: fidelityMaxAmendmentDepth(bead),
+		},
+		Webhook: fidelityWebhook{
+			URL:        bead.Metadata["gc.ff_webhook_url"],
+			HMACSecret: "$GAS_CITY_HMAC_SECRET",
+			KeyID:      webhookHmacKeyid(bead),
+		},
+	}
+}
+
+// fidelityResponseFrom copies the provider response into the job-embedded
+// shape, normalizing PolicyEvents to a non-nil slice so it serializes as []
+// rather than null when empty (release step contract).
+func fidelityResponseFrom(resp harness.ExecutionResponse) fidelityResponse {
+	events := resp.PolicyEvents
+	if events == nil {
+		events = []harness.PolicyEvent{}
+	}
+	return fidelityResponse{
+		Status:                           resp.Status,
+		ProviderVerdict:                  resp.ProviderVerdict,
+		Artifacts:                        resp.Artifacts,
+		ArtifactManifest:                 resp.ArtifactManifest,
+		PolicyEvents:                     events,
+		ModelUsage:                       resp.ModelUsage,
+		RuntimeIdentity:                  resp.RuntimeIdentity,
+		SessionArchiveRef:                resp.SessionArchiveRef,
+		VerifierReportRef:                resp.VerifierReportRef,
+		Error:                            resp.Error,
+		CompletionClaimedWithoutManifest: resp.CompletionClaimedWithoutManifest,
+		StepOutputs:                      resp.StepOutputs,
+	}
+}
+
+// writeFidelityJob serializes the job to rigRoot/fidelity-job.json, creating
+// the rig root directory if needed.
+func writeFidelityJob(rigRoot string, job fidelityJob) error {
+	if err := os.MkdirAll(rigRoot, 0o755); err != nil {
+		return fmt.Errorf("creating rig root %s: %w", rigRoot, err)
+	}
+	data, err := json.MarshalIndent(job, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling fidelity job: %w", err)
+	}
+	jobPath := filepath.Join(rigRoot, "fidelity-job.json")
+	if err := os.WriteFile(jobPath, data, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", jobPath, err)
+	}
+	return nil
+}
+
+// fidelityFactoryAttempt parses gc.factory_attempt as an integer, defaulting to
+// 1 on absence or parse error (the contract requires a bare integer).
+func fidelityFactoryAttempt(bead beads.Bead) int {
+	if v, err := strconv.Atoi(bead.Metadata["gc.factory_attempt"]); err == nil {
+		return v
+	}
+	return 1
+}
+
+// fidelityMaxAmendmentDepth parses gc.max_iterations, defaulting to 5.
+func fidelityMaxAmendmentDepth(bead beads.Bead) int {
+	if v, err := strconv.Atoi(bead.Metadata["gc.max_iterations"]); err == nil && v > 0 {
+		return v
+	}
+	return defaultFidelityMaxAmendmentDepth
+}
+
+// webhookHmacKeyid reads gc.ff_webhook_hmac_keyid, defaulting to v1.
+func webhookHmacKeyid(bead beads.Bead) string {
+	if k := bead.Metadata["gc.ff_webhook_hmac_keyid"]; k != "" {
+		return k
+	}
+	return defaultFidelityWebhookKeyID
+}
+
+// fidelityExitCode extracts the process exit code from a *exec.ExitError. A nil
+// error is exit 0; a non-ExitError (e.g. the script could not start) is mapped
+// to a non-zero sentinel so it is treated as fail-closed.
+func fidelityExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	// Could not even start the script (missing binary, context cancelled, etc).
+	// Treat as a non-zero, non-revise exit so it fails closed.
+	return -1
+}
+
+// recordFidelityVerdict stamps the molecule verdict onto the bead for
+// replay-identity. Best-effort: a metadata write failure is logged but does not
+// change the returned verdict.
+func recordFidelityVerdict(store beads.Store, beadID, verdict string, stderr io.Writer) {
+	if err := store.Update(beadID, beads.UpdateOpts{
+		Metadata: map[string]string{
+			"gc.harness_fidelity_verdict":    verdict,
+			"gc.harness_fidelity_verdict_at": time.Now().UTC().Format(time.RFC3339),
+		},
+	}); err != nil {
+		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict-stamp error: %v\n", beadID, err)
+	}
+}

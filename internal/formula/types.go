@@ -256,6 +256,12 @@ type Step struct {
 	// Evaluated at cook/pour time via FilterStepsByCondition.
 	Condition string `json:"condition,omitempty"`
 
+	// RuntimeRequirements declares the capability keys required from the harness
+	// runtime provider for this step (IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG2).
+	// Drawn from the canonical twelve-key set; the registry selects a provider
+	// whose capability declaration is a superset of this set.
+	RuntimeRequirements []string `json:"runtime_requirements,omitempty" toml:"runtime_requirements,omitempty"`
+
 	// Children are nested steps (for creating epic hierarchies).
 	Children []*Step `json:"children,omitempty"`
 
@@ -390,6 +396,7 @@ type stepTOMLAlias struct {
 	Expand          string            `json:"expand,omitempty"`
 	ExpandVars      map[string]string `json:"expand_vars,omitempty"`
 	Condition       string            `json:"condition,omitempty"`
+	RuntimeReqs     []string          `json:"runtime_requirements,omitempty"`
 	Children        []*stepTOMLAlias  `json:"children,omitempty"`
 	Gate            *Gate             `json:"gate,omitempty"`
 	Loop            *loopTOMLAlias    `json:"loop,omitempty"`
@@ -449,29 +456,30 @@ func (a stepTOMLAlias) toStep() (Step, error) {
 	}
 
 	return Step{
-		ID:              a.ID,
-		Title:           a.Title,
-		Description:     a.Description,
-		DescriptionFile: a.DescriptionFile,
-		Notes:           a.Notes,
-		Type:            a.Type,
-		Priority:        a.Priority,
-		Labels:          a.Labels,
-		Metadata:        a.Metadata,
-		DependsOn:       a.DependsOn,
-		Needs:           a.Needs,
-		WaitsFor:        a.WaitsFor,
-		Assignee:        a.Assignee,
-		Expand:          a.Expand,
-		ExpandVars:      a.ExpandVars,
-		Condition:       a.Condition,
-		Children:        children,
-		Gate:            a.Gate,
-		Loop:            loop,
-		OnComplete:      a.OnComplete,
-		Ralph:           ralph,
-		Retry:           a.Retry,
-		Timeout:         a.Timeout,
+		ID:                  a.ID,
+		Title:               a.Title,
+		Description:         a.Description,
+		DescriptionFile:     a.DescriptionFile,
+		Notes:               a.Notes,
+		Type:                a.Type,
+		Priority:            a.Priority,
+		Labels:              a.Labels,
+		Metadata:            a.Metadata,
+		DependsOn:           a.DependsOn,
+		Needs:               a.Needs,
+		WaitsFor:            a.WaitsFor,
+		Assignee:            a.Assignee,
+		Expand:              a.Expand,
+		ExpandVars:          a.ExpandVars,
+		Condition:           a.Condition,
+		RuntimeRequirements: a.RuntimeReqs,
+		Children:            children,
+		Gate:                a.Gate,
+		Loop:                loop,
+		OnComplete:          a.OnComplete,
+		Ralph:               ralph,
+		Retry:               a.Retry,
+		Timeout:             a.Timeout,
 	}, nil
 }
 

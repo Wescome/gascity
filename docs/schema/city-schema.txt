@@ -920,6 +920,13 @@
           "type": "object",
           "description": "Providers defines named provider presets for agent startup."
         },
+        "provider": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProviderSpec"
+          },
+          "type": "object",
+          "description": "Provider defines the Gas City harness runtime provider registry\n(IS-GC-RUNTIME-PROVIDER-CONTRACT, Open Question 3: the registry lives in\ncity configuration). Each [provider.\u003cid\u003e] block declares a harness runtime\nprovider's URL, harness_slots, and capability_keys. This is distinct from\n[providers.*] (plural), which configures low-level session-provider startup\npresets; [provider.*] (singular) configures the high-level HarnessProvider\nregistry consumed during Formula step provider selection."
+        },
         "packs": {
           "additionalProperties": {
             "$ref": "#/$defs/PackSource"
@@ -1037,6 +1044,21 @@
         "agent"
       ],
       "description": "City is the top-level configuration for a Gas City instance."
+    },
+    "CloudflareConfig": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL is the base URL for the Cloudflare Worker runtime API.\nOverridden by GC_CLOUDFLARE_RUNTIME_URL."
+        },
+        "token": {
+          "type": "string",
+          "description": "Token is a bearer token sent to the Cloudflare Worker runtime API.\nOverridden by GC_CLOUDFLARE_RUNTIME_TOKEN."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "CloudflareConfig holds Cloudflare Worker session provider settings."
     },
     "ConvergenceConfig": {
       "properties": {
@@ -1896,6 +1918,24 @@
           },
           "type": "array",
           "description": "ACPArgs overrides Args when the session transport is ACP.\nWhen nil, Args is used for both tmux and ACP transports."
+        },
+        "url": {
+          "type": "string",
+          "description": "URL is the endpoint a Gas City harness runtime provider calls\n(IS-GC-RUNTIME-PROVIDER-CONTRACT). For pi-rpc it is the ff-pipeline Worker\nbase URL; for cloudflare-sandbox it is the M0 control worker URL. Only read\nfor [provider.*] (singular) harness-registry blocks."
+        },
+        "harness_slots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "HarnessSlots is the Harness Tuple coverage declaration for this provider\n(IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG4). It MUST contain all eight slots\n[\"E\",\"T\",\"C\",\"S\",\"L\",\"V\",\"G\",\"P\"] for the provider to register as a Gas\nCity harness runtime provider; a provider whose slots are incomplete is\nrejected at registration (incomplete_harness_tuple). The gate is a config\nread, not a runtime probe."
+        },
+        "capability_keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "CapabilityKeys is the provider's declared capability key set\n(IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG1/AC-REG5). Every value MUST be\ndrawn from the canonical twelve-key set settled in Open Question 4\n(ai_reasoning, model_routing, workspace_write_scope, command_exec,\nfile_materialize, workspace_init, dependency_prep, session_archive,\nsnapshot_restore, contract_evaluation, tool_capability_probe,\nbackup_restore). The registry matches a step's runtime_requirements\nagainst this set during selection."
         }
       },
       "additionalProperties": false,
@@ -2131,7 +2171,7 @@
       "properties": {
         "provider": {
           "type": "string",
-          "description": "Provider selects the session backend: \"fake\", \"fail\", \"subprocess\",\n\"acp\", \"exec:\u003cscript\u003e\", \"k8s\", or \"\" (default: tmux)."
+          "description": "Provider selects the session backend: \"fake\", \"fail\", \"subprocess\",\n\"acp\", \"exec:\u003cscript\u003e\", \"k8s\", \"cloudflare\", or \"\" (default: tmux)."
         },
         "k8s": {
           "$ref": "#/$defs/K8sConfig",
@@ -2140,6 +2180,10 @@
         "acp": {
           "$ref": "#/$defs/ACPSessionConfig",
           "description": "ACP holds settings for the ACP (Agent Client Protocol) session provider."
+        },
+        "cloudflare": {
+          "$ref": "#/$defs/CloudflareConfig",
+          "description": "Cloudflare holds settings for the Cloudflare Worker session provider.\nEnv vars (GC_CLOUDFLARE_RUNTIME_URL, GC_CLOUDFLARE_RUNTIME_TOKEN) override TOML values."
         },
         "setup_timeout": {
           "type": "string",

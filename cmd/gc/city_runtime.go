@@ -303,6 +303,13 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 	if err := cr.svc.Reload(); err != nil {
 		fmt.Fprintf(cr.stderr, "%s: service init: %v\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
 	}
+	// Build and cache the harness provider registry once at city start so step
+	// dispatch reuses it without rebuilding on every step (Step 5). An invalid
+	// [provider.*] block surfaces here rather than mid-dispatch; the step path
+	// still fails closed if the registry is unavailable when a step needs it.
+	if _, err := harnessRegistryForConfig(p.Cfg); err != nil {
+		fmt.Fprintf(cr.stderr, "%s: harness registry init: %v\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
+	}
 	return cr
 }
 

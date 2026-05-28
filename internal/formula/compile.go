@@ -401,15 +401,16 @@ func flattenSteps(steps []*Step, parentID string, idMapping map[string]string, o
 		}
 
 		rs := RecipeStep{
-			ID:          issueID,
-			Title:       step.Title,
-			Description: step.Description,
-			Notes:       step.Notes,
-			Type:        stepType,
-			Priority:    step.Priority,
-			Labels:      step.Labels,
-			Assignee:    step.Assignee,
-			Metadata:    metadata,
+			ID:                  issueID,
+			Title:               step.Title,
+			Description:         step.Description,
+			Notes:               step.Notes,
+			Type:                stepType,
+			Priority:            step.Priority,
+			Labels:              step.Labels,
+			Assignee:            step.Assignee,
+			Metadata:            metadata,
+			RuntimeRequirements: step.RuntimeRequirements,
 		}
 
 		// Add gate label for waits_for field

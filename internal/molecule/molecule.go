@@ -955,7 +955,7 @@ func stepToBead(step formula.RecipeStep, vars map[string]string, priorityOverrid
 	}
 
 	// Merge step metadata + notes into bead metadata.
-	if len(step.Metadata) > 0 || step.Notes != "" {
+	if len(step.Metadata) > 0 || step.Notes != "" || len(step.RuntimeRequirements) > 0 {
 		b.Metadata = make(map[string]string, len(step.Metadata))
 		for k, v := range step.Metadata {
 			b.Metadata[k] = formula.Substitute(v, vars)
@@ -963,10 +963,24 @@ func stepToBead(step formula.RecipeStep, vars map[string]string, priorityOverrid
 		if step.Notes != "" {
 			b.Metadata["notes"] = formula.Substitute(step.Notes, vars)
 		}
+		// Carry the step's harness runtime_requirements onto the bead so the
+		// control-dispatcher can select a provider whose capability declaration
+		// is a superset of this set (IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG2).
+		// Encoded as a comma-separated key list; an empty set is omitted so
+		// steps without requirements continue through the existing path.
+		if len(step.RuntimeRequirements) > 0 {
+			b.Metadata[RuntimeRequirementsMetadataKey] = strings.Join(step.RuntimeRequirements, ",")
+		}
 	}
 
 	return b
 }
+
+// RuntimeRequirementsMetadataKey is the bead metadata key carrying the
+// comma-separated harness runtime_requirements capability keys for a step
+// (IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG2). The control-dispatcher reads it to
+// drive fail-closed harness provider selection.
+const RuntimeRequirementsMetadataKey = "gc.runtime_requirements"
 
 func preserveExecutableRootType(step formula.RecipeStep) bool {
 	switch step.Metadata["gc.kind"] {

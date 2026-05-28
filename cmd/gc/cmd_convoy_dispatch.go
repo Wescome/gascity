@@ -232,6 +232,25 @@ func runControlDispatcherWithStoreAndConfig(cityPath, storePath string, store be
 		}
 	}
 
+	// Additive harness dispatch (IS-GC-RUNTIME-PROVIDER-CONTRACT): a bead that
+	// declares runtime_requirements is routed through the harness provider
+	// registry and MUST NOT fall through to the legacy dispatch path. A bead
+	// without runtime_requirements proceeds unchanged. Fail-closed: when no
+	// provider satisfies the requirements the step is marked failed here
+	// (AC-FC1, AC-REG3) and the dispatch returns without calling ProcessControl.
+	harnessCtx := opts.Context
+	if harnessCtx == nil {
+		harnessCtx = context.Background()
+	}
+	if outcome, harnessErr := maybeDispatchHarness(harnessCtx, store, bead, cfg, cityPath, stderr); outcome.Attempted {
+		if harnessErr != nil {
+			_, _ = fmt.Fprintf(stderr, "control dispatch: bead=%s harness fail-closed: %v\n", beadID, harnessErr)
+			return nil
+		}
+		_, _ = fmt.Fprintf(stdout, "control dispatch: bead=%s action=harness provider=%s\n", beadID, outcome.Selected)
+		return nil
+	}
+
 	result, err := dispatch.ProcessControl(store, bead, opts)
 	if err != nil {
 		if errors.Is(err, dispatch.ErrControlGraphMalformed) {

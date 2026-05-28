@@ -13,6 +13,7 @@ City is the top-level configuration for a Gas City instance.
 | `include` | []string |  |  | Include lists config fragment files to merge into this config. Processed by LoadWithIncludes; not recursive (fragments cannot include). |
 | `workspace` | Workspace | **yes** |  | Workspace holds city-level metadata (name, default provider). |
 | `providers` | map[string]ProviderSpec |  |  | Providers defines named provider presets for agent startup. |
+| `provider` | map[string]ProviderSpec |  |  | Provider defines the Gas City harness runtime provider registry (IS-GC-RUNTIME-PROVIDER-CONTRACT, Open Question 3: the registry lives in city configuration). Each [provider.&lt;id&gt;] block declares a harness runtime provider's URL, harness_slots, and capability_keys. This is distinct from [providers.*] (plural), which configures low-level session-provider startup presets; [provider.*] (singular) configures the high-level HarnessProvider registry consumed during Formula step provider selection. |
 | `packs` | map[string]PackSource |  |  | Packs defines named remote pack sources fetched via git (V1 mechanism). |
 | `imports` | map[string]Import |  |  | Imports defines named pack imports (V2 mechanism). Each key is a binding name; the value specifies the source and optional version, export, and transitive controls. Processed during ExpandCityPacks. |
 | `agent` | []Agent | **yes** |  | Agents lists all configured agents in this city. |
@@ -248,6 +249,15 @@ ChatSessionsConfig configures chat session behavior.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `idle_timeout` | string |  |  | IdleTimeout is the duration after which a detached chat session is auto-suspended. Duration string (e.g., "30m", "1h"). 0 = disabled. |
+
+## CloudflareConfig
+
+CloudflareConfig holds Cloudflare Worker session provider settings.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `url` | string |  |  | URL is the base URL for the Cloudflare Worker runtime API. Overridden by GC_CLOUDFLARE_RUNTIME_URL. |
+| `token` | string |  |  | Token is a bearer token sent to the Cloudflare Worker runtime API. Overridden by GC_CLOUDFLARE_RUNTIME_TOKEN. |
 
 ## ConvergenceConfig
 
@@ -533,6 +543,9 @@ ProviderSpec defines a named provider's startup parameters.
 | `title_model` | string |  |  | TitleModel is the OptionsSchema model key used for title generation. Resolved via the "model" option in OptionsSchema to get FlagArgs. Defaults to the cheapest/fastest model for each provider. Examples: "haiku" (claude), "o4-mini" (codex), "gemini-2.5-flash" (gemini) |
 | `acp_command` | string |  |  | ACPCommand overrides Command when the session transport is ACP. When empty, Command is used for both tmux and ACP transports. |
 | `acp_args` | []string |  |  | ACPArgs overrides Args when the session transport is ACP. When nil, Args is used for both tmux and ACP transports. |
+| `url` | string |  |  | URL is the endpoint a Gas City harness runtime provider calls (IS-GC-RUNTIME-PROVIDER-CONTRACT). For pi-rpc it is the ff-pipeline Worker base URL; for cloudflare-sandbox it is the M0 control worker URL. Only read for [provider.*] (singular) harness-registry blocks. |
+| `harness_slots` | []string |  |  | HarnessSlots is the Harness Tuple coverage declaration for this provider (IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG4). It MUST contain all eight slots ["E","T","C","S","L","V","G","P"] for the provider to register as a Gas City harness runtime provider; a provider whose slots are incomplete is rejected at registration (incomplete_harness_tuple). The gate is a config read, not a runtime probe. |
+| `capability_keys` | []string |  |  | CapabilityKeys is the provider's declared capability key set (IS-GC-RUNTIME-PROVIDER-CONTRACT AC-REG1/AC-REG5). Every value MUST be drawn from the canonical twelve-key set settled in Open Question 4 (ai_reasoning, model_routing, workspace_write_scope, command_exec, file_materialize, workspace_init, dependency_prep, session_archive, snapshot_restore, contract_evaluation, tool_capability_probe, backup_restore). The registry matches a step's runtime_requirements against this set during selection. |
 
 ## Rig
 
@@ -617,9 +630,10 @@ SessionConfig holds session provider settings.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `provider` | string |  |  | Provider selects the session backend: "fake", "fail", "subprocess", "acp", "exec:&lt;script&gt;", "k8s", or "" (default: tmux). |
+| `provider` | string |  |  | Provider selects the session backend: "fake", "fail", "subprocess", "acp", "exec:&lt;script&gt;", "k8s", "cloudflare", or "" (default: tmux). |
 | `k8s` | K8sConfig |  |  | K8s holds Kubernetes-specific settings for the native K8s provider. |
 | `acp` | ACPSessionConfig |  |  | ACP holds settings for the ACP (Agent Client Protocol) session provider. |
+| `cloudflare` | CloudflareConfig |  |  | Cloudflare holds settings for the Cloudflare Worker session provider. Env vars (GC_CLOUDFLARE_RUNTIME_URL, GC_CLOUDFLARE_RUNTIME_TOKEN) override TOML values. |
 | `setup_timeout` | string |  | `10s` | SetupTimeout is the per-command/script timeout for session setup and pre_start commands. Duration string (e.g., "10s", "30s"). Defaults to "10s". |
 | `nudge_ready_timeout` | string |  | `10s` | NudgeReadyTimeout is how long to wait for the agent to be ready before sending nudge text. Duration string. Defaults to "10s". |
 | `nudge_retry_interval` | string |  | `500ms` | NudgeRetryInterval is the retry interval between nudge readiness polls. Duration string. Defaults to "500ms". |

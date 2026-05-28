@@ -73,6 +73,10 @@ type RecipeStep struct {
 	// Metadata is copied to the bead metadata as string key/value pairs.
 	Metadata map[string]string
 
+	// RuntimeRequirements is the capability key set declared by the formula step.
+	// Populated from formula.Step.RuntimeRequirements at compile time.
+	RuntimeRequirements []string
+
 	// Gate holds async gate configuration if this step has one.
 	Gate *RecipeGate
 }

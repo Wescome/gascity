@@ -69,7 +69,7 @@ type fidelityResponse struct {
 	Status                           harness.ProviderStatus  `json:"status"`
 	ProviderVerdict                  harness.ProviderVerdict `json:"provider_verdict"`
 	Artifacts                        []harness.Artifact      `json:"artifacts"`
-	ArtifactManifest                 []harness.ManifestEntry `json:"artifact_manifest"`
+	ArtifactManifest                 []fidelityManifestEntry `json:"artifact_manifest"`
 	PolicyEvents                     []harness.PolicyEvent   `json:"policy_events"`
 	ModelUsage                       *harness.ModelUsage     `json:"model_usage"`
 	RuntimeIdentity                  harness.RuntimeIdentity `json:"runtime_identity"`
@@ -78,6 +78,12 @@ type fidelityResponse struct {
 	Error                            *harness.ProviderError  `json:"error"`
 	CompletionClaimedWithoutManifest bool                    `json:"completion_claimed_without_manifest"`
 	StepOutputs                      map[string]any          `json:"step_outputs"`
+}
+
+type fidelityManifestEntry struct {
+	Name     string                 `json:"name"`
+	State    harness.ManifestStatus `json:"state"`
+	Checksum string                 `json:"checksum,omitempty"`
 }
 
 // fidelityConvergence carries the amendment ceiling.
@@ -217,7 +223,7 @@ func fidelityResponseFrom(resp harness.ExecutionResponse) fidelityResponse {
 		Status:                           resp.Status,
 		ProviderVerdict:                  resp.ProviderVerdict,
 		Artifacts:                        resp.Artifacts,
-		ArtifactManifest:                 resp.ArtifactManifest,
+		ArtifactManifest:                 fidelityManifestFrom(resp),
 		PolicyEvents:                     events,
 		ModelUsage:                       resp.ModelUsage,
 		RuntimeIdentity:                  resp.RuntimeIdentity,
@@ -227,6 +233,27 @@ func fidelityResponseFrom(resp harness.ExecutionResponse) fidelityResponse {
 		CompletionClaimedWithoutManifest: resp.CompletionClaimedWithoutManifest,
 		StepOutputs:                      resp.StepOutputs,
 	}
+}
+
+func fidelityManifestFrom(resp harness.ExecutionResponse) []fidelityManifestEntry {
+	checksums := make(map[string]string, len(resp.Artifacts))
+	for _, artifact := range resp.Artifacts {
+		if artifact.Path != "" && artifact.Checksum != "" {
+			checksums[artifact.Path] = artifact.Checksum
+		}
+	}
+	out := make([]fidelityManifestEntry, 0, len(resp.ArtifactManifest))
+	for _, entry := range resp.ArtifactManifest {
+		converted := fidelityManifestEntry{
+			Name:  entry.Artifact,
+			State: entry.Status,
+		}
+		if entry.Status == harness.ManifestProduced {
+			converted.Checksum = checksums[entry.Artifact]
+		}
+		out = append(out, converted)
+	}
+	return out
 }
 
 // writeFidelityJob serializes the job to rigRoot/fidelity-job.json, creating

@@ -74,7 +74,10 @@ func TestFidelityValidatorWritesJobShape(t *testing.T) {
 	bead := fidelityTestBead(t)
 	rigRoot := bead.Metadata["gc.rig_root"]
 	resp := harness.ExecutionResponse{
-		Status:           harness.StatusCompleted,
+		Status: harness.StatusCompleted,
+		Artifacts: []harness.Artifact{
+			{Path: "out.txt", Size: 4, Checksum: "sha256:abcd"},
+		},
 		ArtifactManifest: []harness.ManifestEntry{{Artifact: "out.txt", Status: harness.ManifestProduced}},
 	}
 
@@ -119,6 +122,23 @@ func TestFidelityValidatorWritesJobShape(t *testing.T) {
 	}
 	if respMap["status"] != "completed" {
 		t.Errorf("response.status = %v, want completed", respMap["status"])
+	}
+	manifest, ok := respMap["artifact_manifest"].([]any)
+	if !ok || len(manifest) != 1 {
+		t.Fatalf("response.artifact_manifest = %#v, want one entry", respMap["artifact_manifest"])
+	}
+	entry, ok := manifest[0].(map[string]any)
+	if !ok {
+		t.Fatalf("response.artifact_manifest[0] wrong type: %T", manifest[0])
+	}
+	if entry["name"] != "out.txt" {
+		t.Errorf("manifest name = %v, want out.txt", entry["name"])
+	}
+	if entry["state"] != "produced" {
+		t.Errorf("manifest state = %v, want produced", entry["state"])
+	}
+	if entry["checksum"] != "sha256:abcd" {
+		t.Errorf("manifest checksum = %v, want sha256:abcd", entry["checksum"])
 	}
 
 	conv, ok := job["convergence"].(map[string]any)

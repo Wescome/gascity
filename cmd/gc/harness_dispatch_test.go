@@ -104,13 +104,10 @@ func TestMaybeDispatchHarnessSkipsBeadWithoutRequirements(t *testing.T) {
 	}
 }
 
-// A step whose requirements are satisfied selects the provider and runs
-// ExecuteStep with the populated request envelope.
+// A non-release step whose requirements are satisfied selects the provider,
+// runs ExecuteStep with the populated request envelope, and closes pass from
+// the provider execution status without invoking the RELEASE webhook driver.
 func TestMaybeDispatchHarnessSelectsProviderAndExecutes(t *testing.T) {
-	// A successful provider execution now flows into the fidelity validator;
-	// point it at a fake release driver that POSTs RELEASE (exit 0) so this test
-	// exercises only the selection + execution path.
-	writeFakeFidelityScript(t, 0)
 	store := beads.NewMemStore()
 	cfg, provider, cleanup := seedHarnessRegistry(t, "pi-rpc", []string{"ai_reasoning", "model_routing", "command_exec"}, 1)
 	defer cleanup()
@@ -164,6 +161,15 @@ func TestMaybeDispatchHarnessSelectsProviderAndExecutes(t *testing.T) {
 	}
 	if updated.Metadata["gc.harness_provider_id"] != "pi-rpc" {
 		t.Errorf("gc.harness_provider_id = %q, want pi-rpc", updated.Metadata["gc.harness_provider_id"])
+	}
+	if updated.Status != "closed" {
+		t.Errorf("status = %q, want closed", updated.Status)
+	}
+	if updated.Metadata["gc.outcome"] != "pass" {
+		t.Errorf("gc.outcome = %q, want pass", updated.Metadata["gc.outcome"])
+	}
+	if updated.Metadata["gc.harness_dispatch_state"] != "completed" {
+		t.Errorf("gc.harness_dispatch_state = %q, want completed", updated.Metadata["gc.harness_dispatch_state"])
 	}
 }
 

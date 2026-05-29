@@ -186,6 +186,15 @@ func maybeDispatchHarness(ctx context.Context, store beads.Store, bead beads.Bea
 	_, _ = fmt.Fprintf(stderr, "harness dispatch: bead=%s provider=%s status=%s\n", bead.ID, providerID, resp.Status)
 	recordHarnessSelection(store, bead.ID, providerID, resp)
 
+	if !isHarnessReleaseStep(bead) {
+		if resp.Status != harness.StatusCompleted {
+			failHarnessStepClosed(store, bead.ID, "provider_execution_not_completed", fmt.Sprintf("provider status=%s", resp.Status), stderr)
+			return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, fmt.Errorf("harness dispatch bead=%s provider=%s: provider status=%s", bead.ID, providerID, resp.Status)
+		}
+		closeHarnessStepPassed(store, bead.ID, stderr)
+		return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, nil
+	}
+
 	if fidErr := runFidelityValidator(ctx, store, bead, cfg, cityPath, resp, stderr); fidErr != nil {
 		return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, fmt.Errorf("harness dispatch bead=%s provider=%s: %w", bead.ID, providerID, fidErr)
 	}
@@ -323,6 +332,28 @@ func harnessIdempotencyKey(bead beads.Bead) string {
 		return key
 	}
 	return bead.ID
+}
+
+func isHarnessReleaseStep(bead beads.Bead) bool {
+	step := strings.ToLower(strings.TrimSpace(harnessStepName(bead)))
+	if strings.Contains(step, "release") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(bead.Title), "release")
+}
+
+func closeHarnessStepPassed(store beads.Store, beadID string, stderr io.Writer) {
+	closed := "closed"
+	if err := store.Update(beadID, beads.UpdateOpts{
+		Status: &closed,
+		Metadata: map[string]string{
+			"gc.outcome":                "pass",
+			"gc.harness_dispatch_state": "completed",
+			"gc.harness_completed_at":   time.Now().UTC().Format(time.RFC3339),
+		},
+	}); err != nil {
+		_, _ = fmt.Fprintf(stderr, "harness dispatch: bead=%s pass update error: %v\n", beadID, err)
+	}
 }
 
 // failHarnessStepClosed marks a bead failed-closed when harness dispatch cannot

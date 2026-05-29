@@ -281,8 +281,9 @@ func (p *Provider) Restore(_ context.Context, _ harness.RestoreRequest) (harness
 	return harness.RestoreResponse{Status: "ok"}, nil
 }
 
-// Status maps to GET /__pi-container/status (AC-LC9). Running → healthy/ready
-// with positive capacity (the registry reads capacity during selection).
+// Status maps to GET /__pi-container/status (AC-LC9). A reachable PI Worker has
+// dispatch capacity even when the bounded singleton Container is currently
+// stopped: /__pi-container/execute is the operation that wakes it.
 func (p *Provider) Status(ctx context.Context, _ harness.StatusRequest) (harness.StatusResponse, error) {
 	_, body, err := p.get(ctx, statusPath, defaultStatusTimeout)
 	if err != nil {
@@ -301,10 +302,7 @@ func (p *Provider) Status(ctx context.Context, _ harness.StatusRequest) (harness
 		Healthy:         cs.Running,
 		Ready:           cs.Running && cs.QueueDepth == 0 || cs.Running,
 		ProviderVersion: p.version,
-	}
-	if cs.Running {
-		// Bounded singleton: report at least one unit of capacity when running.
-		st.Capacity = 1
+		Capacity:        1,
 	}
 	return st, nil
 }

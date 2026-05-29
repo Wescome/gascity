@@ -283,6 +283,31 @@ func TestStatus_QueriesContainerStatus(t *testing.T) {
 	}
 }
 
+func TestStatus_ReportsCapacityWhenContainerStopped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/__pi-container/status" && r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"running":        false,
+				"desiredBuildId": "b1",
+				"startedBuildId": "",
+				"queueDepth":     0,
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	p := mustNew(t, srv.URL)
+	st, err := p.Status(context.Background(), harness.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.Capacity <= 0 {
+		t.Fatalf("expected dispatch capacity while container is stopped, got %d", st.Capacity)
+	}
+}
+
 // AC-LC6: CollectPolicyEvents returns a non-nil slice.
 func TestCollectPolicyEvents_NeverNil(t *testing.T) {
 	p := mustNew(t, "http://example.invalid")

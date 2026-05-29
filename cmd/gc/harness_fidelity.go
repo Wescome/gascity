@@ -153,6 +153,7 @@ func runFidelityValidator(ctx context.Context, store beads.Store, bead beads.Bea
 		return ErrFidelityRevise
 	case fidelityExitFailClosed:
 		recordFidelityVerdict(store, bead.ID, "fail_closed", stderr)
+		failHarnessStepClosed(store, bead.ID, "fidelity_fail_closed", ErrFidelityFailClosed.Error(), stderr)
 		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=fail_closed\n", bead.ID)
 		return ErrFidelityFailClosed
 	default:
@@ -160,6 +161,7 @@ func runFidelityValidator(ctx context.Context, store beads.Store, bead beads.Bea
 		// not give us a clean release or a structured revise, so we must not
 		// proceed as if the step succeeded.
 		recordFidelityVerdict(store, bead.ID, "fail_closed", stderr)
+		failHarnessStepClosed(store, bead.ID, "fidelity_fail_closed", fmt.Sprintf("fidelity-release.sh exit=%d", exitCode), stderr)
 		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=fail_closed (unexpected exit=%d)\n", bead.ID, exitCode)
 		return fmt.Errorf("%w: fidelity-release.sh exit=%d", ErrFidelityFailClosed, exitCode)
 	}

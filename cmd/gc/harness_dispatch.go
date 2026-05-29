@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -197,6 +198,7 @@ func maybeDispatchHarness(ctx context.Context, store beads.Store, bead beads.Bea
 // opaquely; this function never interprets them as Factory categories.
 func harnessExecutionRequestForBead(bead beads.Bead, cfg *config.City, cityPath string, reqs []string) harness.ExecutionRequest {
 	cityID := loadedCityName(cfg, cityPath)
+	declaredOutputs := harnessDeclaredOutputsForBead(bead)
 	return harness.ExecutionRequest{
 		CityID:          cityID,
 		SessionID:       bead.Metadata["gc.session_id"],
@@ -207,16 +209,93 @@ func harnessExecutionRequestForBead(bead beads.Bead, cfg *config.City, cityPath 
 		StepName:        harnessStepName(bead),
 		RoleName:        bead.Assignee,
 		Purpose:         bead.Title,
-		DeclaredOutputs: nil,
+		DeclaredOutputs: declaredOutputs,
 		RuntimeConfig:   map[string]any{},
+		Policy:          harnessPolicyForRequirements(reqs),
 		ContextRefs: harness.ContextRefs{
 			FnID: bead.Metadata["gc.fn_id"],
 			IsID: bead.Metadata["gc.is_id"],
 			EsID: bead.Metadata["gc.es_id"],
 			EpID: bead.Metadata["gc.ep_id"],
 		},
-		IdempotencyKey: harnessIdempotencyKey(bead),
+		VerifierContract: harnessVerifierContractForOutputs(declaredOutputs),
+		IdempotencyKey:   harnessIdempotencyKey(bead),
 	}
+}
+
+func harnessDeclaredOutputsForBead(bead beads.Bead) []string {
+	if raw := strings.TrimSpace(bead.Metadata["gc.declared_outputs"]); raw != "" {
+		if outputs := parseHarnessOutputList(raw); len(outputs) > 0 {
+			return outputs
+		}
+	}
+	const marker = "**Expected outputs:**"
+	for _, line := range strings.Split(bead.Description, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, marker) {
+			continue
+		}
+		if outputs := parseHarnessOutputList(strings.TrimSpace(strings.TrimPrefix(line, marker))); len(outputs) > 0 {
+			return outputs
+		}
+	}
+	return nil
+}
+
+func parseHarnessOutputList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var outputs []string
+	if err := json.Unmarshal([]byte(raw), &outputs); err == nil {
+		return compactHarnessOutputs(outputs)
+	}
+	parts := strings.Split(raw, ",")
+	for i := range parts {
+		parts[i] = strings.Trim(strings.TrimSpace(parts[i]), `"'[]`)
+	}
+	return compactHarnessOutputs(parts)
+}
+
+func compactHarnessOutputs(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func harnessVerifierContractForOutputs(outputs []string) *harness.VerifierContract {
+	contract := &harness.VerifierContract{ExpectsInternalVerification: true}
+	for _, output := range outputs {
+		contract.DeclaredOutputMatch = append(contract.DeclaredOutputMatch, harness.OutputMatchRule{Artifact: output, Kind: "text"})
+	}
+	return contract
+}
+
+func harnessPolicyForRequirements(reqs []string) *harness.Policy {
+	policy := &harness.Policy{FilesystemScope: []string{"/workspace"}}
+	for _, req := range reqs {
+		switch strings.TrimSpace(req) {
+		case "command_exec":
+			policy.ToolAllowlist = append(policy.ToolAllowlist, "command_exec")
+		case "file_materialize", "workspace_write_scope":
+			if len(policy.FilesystemScope) == 0 {
+				policy.FilesystemScope = []string{"/workspace"}
+			}
+		}
+	}
+	return policy
 }
 
 func harnessStepName(bead beads.Bead) string {

@@ -151,6 +151,9 @@ func TestMaybeDispatchHarnessSelectsProviderAndExecutes(t *testing.T) {
 	if got.MoleculeID != "mol-1" {
 		t.Errorf("ExecuteStep MoleculeID = %q, want mol-1", got.MoleculeID)
 	}
+	if got.VerifierContract == nil || got.VerifierContract.IsEmpty() {
+		t.Fatalf("ExecuteStep VerifierContract is empty")
+	}
 	// The selected provider is recorded on the bead for replay-identity.
 	updated, err := store.Get(bead.ID)
 	if err != nil {
@@ -158,6 +161,28 @@ func TestMaybeDispatchHarnessSelectsProviderAndExecutes(t *testing.T) {
 	}
 	if updated.Metadata["gc.harness_provider_id"] != "pi-rpc" {
 		t.Errorf("gc.harness_provider_id = %q, want pi-rpc", updated.Metadata["gc.harness_provider_id"])
+	}
+}
+
+func TestHarnessExecutionRequestExtractsDeclaredOutputs(t *testing.T) {
+	bead := beads.Bead{
+		ID:          "gc-1",
+		Title:       "Plan",
+		Description: "**Expected outputs:** [\"PLAN.md\"]\n",
+		Metadata: map[string]string{
+			"gc.root_bead_id": "gc-root",
+			"gc.step_ref":     "factory.plan",
+		},
+	}
+	req := harnessExecutionRequestForBead(bead, &config.City{}, t.TempDir(), []string{"workspace_write_scope"})
+	if len(req.DeclaredOutputs) != 1 || req.DeclaredOutputs[0] != "PLAN.md" {
+		t.Fatalf("DeclaredOutputs = %#v, want PLAN.md", req.DeclaredOutputs)
+	}
+	if req.VerifierContract == nil || req.VerifierContract.IsEmpty() {
+		t.Fatalf("VerifierContract is empty")
+	}
+	if req.Policy == nil || req.Policy.IsEmpty() {
+		t.Fatalf("Policy is empty")
 	}
 }
 

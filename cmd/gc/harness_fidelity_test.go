@@ -39,16 +39,16 @@ func fidelityTestBead(t *testing.T) beads.Bead {
 	return beads.Bead{
 		ID: "bead-fidelity-1",
 		Metadata: map[string]string{
-			"gc.fn_id":                "FN-GC-1",
-			"gc.is_id":                "IS-GC-1",
-			"gc.es_id":                "ES-GC-1",
-			"gc.ep_id":                "EP-GC-1",
-			"gc.form_id":              "FORM-GC-1",
-			"gc.factory_attempt":      "3",
-			"gc.rig_root":             rigRoot,
-			"gc.ff_webhook_url":       "https://factory.example/webhook",
+			"gc.fn_id":                 "FN-GC-1",
+			"gc.is_id":                 "IS-GC-1",
+			"gc.es_id":                 "ES-GC-1",
+			"gc.ep_id":                 "EP-GC-1",
+			"gc.form_id":               "FORM-GC-1",
+			"gc.factory_attempt":       "3",
+			"gc.rig_root":              rigRoot,
+			"gc.ff_webhook_url":        "https://factory.example/webhook",
 			"gc.ff_webhook_hmac_keyid": "v2",
-			"gc.max_iterations":       "7",
+			"gc.max_iterations":        "7",
 		},
 	}
 }
@@ -262,6 +262,12 @@ func TestFidelityValidatorExitTwentyReturnsFailClosed(t *testing.T) {
 	if updated.Metadata["gc.harness_fidelity_verdict"] != "fail_closed" {
 		t.Errorf("gc.harness_fidelity_verdict = %q, want fail_closed", updated.Metadata["gc.harness_fidelity_verdict"])
 	}
+	if updated.Status != "closed" {
+		t.Errorf("status = %q, want closed", updated.Status)
+	}
+	if updated.Metadata["gc.failure_reason"] != "fidelity_fail_closed" {
+		t.Errorf("gc.failure_reason = %q, want fidelity_fail_closed", updated.Metadata["gc.failure_reason"])
+	}
 }
 
 // Any other non-zero exit is treated as fail-closed.
@@ -278,6 +284,13 @@ func TestFidelityValidatorUnknownExitTreatedAsFailClosed(t *testing.T) {
 	err = runFidelityValidator(context.Background(), store, bead, &config.City{}, t.TempDir(), harness.ExecutionResponse{Status: harness.StatusFailed}, &bytes.Buffer{})
 	if !errors.Is(err, ErrFidelityFailClosed) {
 		t.Fatalf("expected ErrFidelityFailClosed for unknown exit, got %v", err)
+	}
+	updated, err := store.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Status != "closed" {
+		t.Errorf("status = %q, want closed", updated.Status)
 	}
 }
 

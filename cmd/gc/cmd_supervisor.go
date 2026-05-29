@@ -1543,6 +1543,7 @@ func reconcileCities(
 		}
 		cs.ct = cityRuntime.crashTrack()
 		cs.pokeCh = pokeCh
+		cs.controlDispatcherCh = controlDispatcherCh
 		cs.configDirty = configDirty
 		cs.services = cityRuntime.svc
 		cs.startBeadEventWatcher(cityCtx)

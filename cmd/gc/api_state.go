@@ -51,6 +51,7 @@ type controllerState struct {
 	storeMetadataSignature string
 	ct                     crashTracker  // nil if crash tracking disabled
 	pokeCh                 chan struct{} // nil when poke is not available; triggers immediate reconciler tick
+	controlDispatcherCh    chan struct{} // nil when control-dispatcher lane is not available
 	configDirty            *atomic.Bool  // optional dirty flag shared with the reconciler reload path
 	services               workspacesvc.Registry
 	extmsgSvc              *extmsg.Services
@@ -1178,6 +1179,19 @@ func (cs *controllerState) Poke() {
 	select {
 	case cs.pokeCh <- struct{}{}:
 	default: // poke already pending
+	}
+}
+
+// PokeControlDispatcher signals the graph workflow control-dispatcher lane
+// without waiting for the next generic reconciler tick.
+func (cs *controllerState) PokeControlDispatcher() {
+	if cs.controlDispatcherCh == nil {
+		cs.Poke()
+		return
+	}
+	select {
+	case cs.controlDispatcherCh <- struct{}{}:
+	default: // control-dispatcher poke already pending
 	}
 }
 

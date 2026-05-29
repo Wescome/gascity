@@ -402,6 +402,10 @@ func (n *apiNotifier) PokeController(_ string) {
 }
 
 func (n *apiNotifier) PokeControlDispatch(_ string) {
+	if p, ok := n.state.(interface{ PokeControlDispatcher() }); ok {
+		p.PokeControlDispatcher()
+		return
+	}
 	n.state.Poke()
 }
 

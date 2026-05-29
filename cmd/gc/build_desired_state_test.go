@@ -3198,31 +3198,45 @@ func TestSelectOrCreatePoolSessionBead_SerializesAliasCheckAndCreate(t *testing.
 }
 
 // delayingPoolCreateStore sleeps for `delay` on every session-bead create so
-// tests can measure whether realizePoolDesiredSessions runs distinct-alias
+// tests can observe whether realizePoolDesiredSessions runs distinct-alias
 // creates in parallel or serializes them. Wraps MemStore for all other ops.
 type delayingPoolCreateStore struct {
 	*beads.MemStore
-	delay time.Duration
+	delay  time.Duration
+	mu     sync.Mutex
+	active int
+	max    int
 }
 
 func (s *delayingPoolCreateStore) Create(bead beads.Bead) (beads.Bead, error) {
 	if bead.Type == sessionBeadType {
+		s.mu.Lock()
+		s.active++
+		if s.active > s.max {
+			s.max = s.active
+		}
+		s.mu.Unlock()
 		time.Sleep(s.delay)
+		s.mu.Lock()
+		s.active--
+		s.mu.Unlock()
 	}
 	return s.MemStore.Create(bead)
+}
+
+func (s *delayingPoolCreateStore) maxConcurrentCreates() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.max
 }
 
 // TestRealizePoolDesiredSessions_ParallelizesDistinctAliasCreates verifies
 // that the three-phase pipeline drives distinct-alias pool creates in parallel
 // rather than serializing them one-per-tick. Issue #2319 reported O(N) wall
 // time on pool fanouts because each create acquired a per-alias session lock
-// + dolt commit in a tight serial loop. With bounded-parallel phase B, wall
-// time should collapse to roughly ceil(N/poolRealizeParallelism) × delay.
-//
-// The assertion bounds elapsed strictly below half the serial floor so a
-// regression that re-serializes the loop (e.g., a future refactor that
-// accidentally holds a mutex across the create call) fails this test before
-// it ships.
+// + dolt commit in a tight serial loop. The assertion observes concurrent
+// session-bead creates directly so unrelated phase-C work cannot make the
+// test fail on loaded hosts.
 func TestRealizePoolDesiredSessions_ParallelizesDistinctAliasCreates(t *testing.T) {
 	const (
 		requestCount = 8
@@ -3250,18 +3264,14 @@ func TestRealizePoolDesiredSessions_ParallelizesDistinctAliasCreates(t *testing.
 	}
 	state := PoolDesiredState{Template: "claude", Requests: requests}
 
-	start := time.Now()
 	realizePoolDesiredSessions(bp, &cfg.Agents[0], state, desired, &stderr)
-	elapsed := time.Since(start)
 
 	if got := len(desired); got != requestCount {
 		t.Fatalf("desired count = %d, want %d; stderr=%q", got, requestCount, stderr.String())
 	}
 
-	serialFloor := time.Duration(requestCount) * createDelay
-	parallelCeiling := serialFloor / 2
-	if elapsed >= parallelCeiling {
-		t.Fatalf("realizePoolDesiredSessions ran in %s for %d creates × %s delay; serial floor = %s, parallel ceiling = %s — the refactor did not parallelize", elapsed, requestCount, createDelay, serialFloor, parallelCeiling)
+	if got := store.maxConcurrentCreates(); got < 2 {
+		t.Fatalf("max concurrent session-bead creates = %d, want > 1", got)
 	}
 
 	aliases := make(map[string]bool, requestCount)

@@ -466,6 +466,10 @@ func DecorateGraphWorkflowRecipe(recipe *formula.Recipe, routeVars map[string]st
 			AssignGraphStepRoute(step, binding, &controlRoute)
 			continue
 		}
+		if len(step.RuntimeRequirements) > 0 {
+			AssignGraphStepRoute(step, binding, &controlRoute)
+			continue
+		}
 		AssignGraphStepRoute(step, binding, nil)
 	}
 	return nil

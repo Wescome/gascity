@@ -264,6 +264,43 @@ func TestDecorateGraphWorkflowRecipe_SetsRootMetadata(t *testing.T) {
 	}
 }
 
+func TestDecorateGraphWorkflowRecipe_RuntimeRequirementStepUsesControlDispatcher(t *testing.T) {
+	cfg := &config.City{Agents: []config.Agent{
+		{Name: "coder", MaxActiveSessions: intPtr(3)},
+		{Name: "control-dispatcher", MaxActiveSessions: intPtr(1)},
+	}}
+	r := &formula.Recipe{
+		Name: "wf-test",
+		Steps: []formula.RecipeStep{
+			{ID: "wf-test.root", IsRoot: true, Metadata: map[string]string{
+				"gc.kind": "workflow", "gc.formula_contract": "graph.v2",
+			}},
+			{
+				ID:                  "wf-test.plan",
+				Metadata:            map[string]string{},
+				RuntimeRequirements: []string{"ai_reasoning", "model_routing"},
+			},
+		},
+	}
+	deps := Deps{Resolver: testAgentResolver{}}
+
+	err := DecorateGraphWorkflowRecipe(r, nil, "src-1", "city", "test-city", "city:test", "coder", "", nil, "test-city", cfg, deps)
+	if err != nil {
+		t.Fatalf("DecorateGraphWorkflowRecipe: %v", err)
+	}
+
+	step := r.Steps[1]
+	if got := step.Assignee; got != "control-dispatcher" {
+		t.Fatalf("runtime step assignee = %q, want control-dispatcher", got)
+	}
+	if got := step.Metadata["gc.routed_to"]; got != "" {
+		t.Fatalf("runtime step gc.routed_to = %q, want empty for direct control assignment", got)
+	}
+	if got := step.Metadata[GraphExecutionRouteMetaKey]; got != "coder" {
+		t.Fatalf("runtime step %s = %q, want coder", GraphExecutionRouteMetaKey, got)
+	}
+}
+
 func TestDecorateGraphWorkflowRecipe_NilRecipe(t *testing.T) {
 	err := DecorateGraphWorkflowRecipe(nil, nil, "", "", "", "", "", "", nil, "", nil, Deps{})
 	if err == nil {

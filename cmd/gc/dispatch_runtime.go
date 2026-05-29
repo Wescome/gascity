@@ -457,7 +457,7 @@ func drainWorkflowServeWork(agentCfg config.Agent, cityPath, storePath, workQuer
 		for _, candidate := range queue {
 			beadID := candidate.ID
 			kind := strings.TrimSpace(candidate.Metadata["gc.kind"])
-			if !isControlDispatcherKind(kind) {
+			if !isControlDispatcherKind(kind) && strings.TrimSpace(candidate.Metadata["gc.runtime_requirements"]) == "" {
 				unexpectedKindCount++
 				workflowTracef("serve unexpected-kind-skip bead=%s kind=%s", beadID, kind)
 				continue

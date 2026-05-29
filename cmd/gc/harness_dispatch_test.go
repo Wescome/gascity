@@ -151,6 +151,9 @@ func TestMaybeDispatchHarnessSelectsProviderAndExecutes(t *testing.T) {
 	if got.MoleculeID != "mol-1" {
 		t.Errorf("ExecuteStep MoleculeID = %q, want mol-1", got.MoleculeID)
 	}
+	if got.SessionID != "mol-1" {
+		t.Errorf("ExecuteStep SessionID = %q, want root fallback mol-1", got.SessionID)
+	}
 	if got.VerifierContract == nil || got.VerifierContract.IsEmpty() {
 		t.Fatalf("ExecuteStep VerifierContract is empty")
 	}

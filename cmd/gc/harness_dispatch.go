@@ -199,9 +199,16 @@ func maybeDispatchHarness(ctx context.Context, store beads.Store, bead beads.Bea
 func harnessExecutionRequestForBead(bead beads.Bead, cfg *config.City, cityPath string, reqs []string) harness.ExecutionRequest {
 	cityID := loadedCityName(cfg, cityPath)
 	declaredOutputs := harnessDeclaredOutputsForBead(bead)
+	sessionID := strings.TrimSpace(bead.Metadata["gc.session_id"])
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(bead.Metadata["gc.root_bead_id"])
+	}
+	if sessionID == "" {
+		sessionID = bead.ID
+	}
 	return harness.ExecutionRequest{
 		CityID:          cityID,
-		SessionID:       bead.Metadata["gc.session_id"],
+		SessionID:       sessionID,
 		FormulaID:       bead.Metadata["gc.formula_id"],
 		FormulaVersion:  bead.Metadata["gc.formula_version"],
 		MoleculeID:      bead.Metadata["gc.root_bead_id"],

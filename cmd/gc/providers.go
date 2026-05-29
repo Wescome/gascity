@@ -27,6 +27,7 @@ import (
 	sessionexec "github.com/gastownhall/gascity/internal/runtime/exec"
 	sessionhybrid "github.com/gastownhall/gascity/internal/runtime/hybrid"
 	sessionk8s "github.com/gastownhall/gascity/internal/runtime/k8s"
+	sessionnoop "github.com/gastownhall/gascity/internal/runtime/noop"
 	sessionsubprocess "github.com/gastownhall/gascity/internal/runtime/subprocess"
 	sessiontmux "github.com/gastownhall/gascity/internal/runtime/tmux"
 	"github.com/gastownhall/gascity/internal/session"
@@ -128,6 +129,11 @@ func newSessionProviderByName(name string, sc config.SessionConfig, cityName, ci
 		return runtime.NewFake(), nil
 	case "fail":
 		return runtime.NewFailFake(), nil
+	case "noop":
+		if cityPath != "" {
+			return sessionnoop.NewProviderWithDir(providerStateDir("noop", cityPath)), nil
+		}
+		return sessionnoop.NewProvider(), nil
 	case "subprocess":
 		if cityPath != "" {
 			return sessionsubprocess.NewProviderWithDir(providerStateDir("subprocess", cityPath)), nil

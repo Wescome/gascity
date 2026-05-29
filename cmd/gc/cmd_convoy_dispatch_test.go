@@ -2764,6 +2764,38 @@ path = %q
 	}
 }
 
+func TestWorkflowServeQueueIncludesRawControlDispatcherAssignee(t *testing.T) {
+	clearGCEnv(t)
+	disableManagedDoltRecoveryForTest(t)
+	cityDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte("[workspace]\nname = \"factory\"\n\n[beads]\nprovider = \"file\"\n"), 0o644); err != nil {
+		t.Fatalf("write city.toml: %v", err)
+	}
+	store, err := openStoreAtForCity(cityDir, cityDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	bead, err := store.Create(beads.Bead{
+		Title:    "Plan",
+		Status:   "open",
+		Assignee: config.ControlDispatcherAgentName,
+		Metadata: map[string]string{
+			"gc.runtime_requirements": "ai_reasoning",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create bead: %v", err)
+	}
+
+	queue, err := workflowServeQueue(config.Agent{Name: config.ControlDispatcherAgentName}, cityDir, cityDir, "", nil)
+	if err != nil {
+		t.Fatalf("workflowServeQueue: %v", err)
+	}
+	if len(queue) != 1 || queue[0].ID != bead.ID {
+		t.Fatalf("queue = %#v, want raw control-dispatcher bead %s", queue, bead.ID)
+	}
+}
+
 func TestOpenControlStoreDisablesAutoExportWithoutSandboxingWrites(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)

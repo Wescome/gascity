@@ -522,7 +522,11 @@ func workflowServeQueue(agentCfg config.Agent, cityPath, storePath, workQuery st
 		}
 		seen := map[string]struct{}{}
 		var ready []beads.Bead
-		for _, assignee := range []string{agentCfg.QualifiedName(), config.NamedSessionRuntimeName(loadedCityName(nil, cityPath), config.Workspace{}, agentCfg.QualifiedName())} {
+		for _, assignee := range []string{
+			agentCfg.Name,
+			agentCfg.QualifiedName(),
+			config.NamedSessionRuntimeName(loadedCityName(nil, cityPath), config.Workspace{}, agentCfg.QualifiedName()),
+		} {
 			if strings.TrimSpace(assignee) == "" {
 				continue
 			}

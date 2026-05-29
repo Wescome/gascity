@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -25,10 +27,12 @@ var fidelityReleaseScriptPath = "/data/cities/factory/fidelity/fidelity-release.
 // defaultFidelityMaxAmendmentDepth is the convergence ceiling used when a bead
 // carries no gc.max_iterations metadata.
 const defaultFidelityMaxAmendmentDepth = 5
+const defaultFidelityFactoryAttempt = 1
 
 // defaultFidelityWebhookKeyID is the HMAC key id used when a bead carries no
 // gc.ff_webhook_hmac_keyid metadata.
 const defaultFidelityWebhookKeyID = "v1"
+const defaultFidelityWebhookURL = "https://ff-pipeline.koales.workers.dev/webhooks/gascity"
 
 // Fidelity validator verdicts, surfaced to the caller so it can re-enter the
 // molecule (revise) or stop (fail-closed). The bead itself is closed/POSTed by
@@ -185,16 +189,17 @@ func fidelityRigRoot(bead beads.Bead, cityPath string) string {
 // buildFidelityJob assembles the fidelity job document from bead lineage
 // metadata and the provider response.
 func buildFidelityJob(bead beads.Bead, resp harness.ExecutionResponse) fidelityJob {
+	lineage := fidelityLineageFromBead(bead)
 	return fidelityJob{
 		StepName:      "release",
 		IsReleaseStep: true,
 		Lineage: fidelityLineage{
-			FnID:           bead.Metadata["gc.fn_id"],
-			IsID:           bead.Metadata["gc.is_id"],
-			EsID:           bead.Metadata["gc.es_id"],
-			EpID:           bead.Metadata["gc.ep_id"],
-			FormID:         bead.Metadata["gc.form_id"],
-			FactoryAttempt: fidelityFactoryAttempt(bead),
+			FnID:           lineage.FnID,
+			IsID:           lineage.IsID,
+			EsID:           lineage.EsID,
+			EpID:           lineage.EpID,
+			FormID:         lineage.FormID,
+			FactoryAttempt: lineage.FactoryAttempt,
 			BeadID:         bead.ID,
 		},
 		DeclaredOutputs:   []string{},
@@ -204,11 +209,67 @@ func buildFidelityJob(bead beads.Bead, resp harness.ExecutionResponse) fidelityJ
 			MaxAmendmentDepth: fidelityMaxAmendmentDepth(bead),
 		},
 		Webhook: fidelityWebhook{
-			URL:        bead.Metadata["gc.ff_webhook_url"],
-			HMACSecret: "$GAS_CITY_HMAC_SECRET",
+			URL:        fidelityWebhookURL(bead),
+			HMACSecret: os.Getenv("GAS_CITY_HMAC_SECRET"),
 			KeyID:      webhookHmacKeyid(bead),
 		},
 	}
+}
+
+func fidelityLineageFromBead(bead beads.Bead) fidelityLineage {
+	lineage := fidelityLineage{
+		FnID:           strings.TrimSpace(bead.Metadata["gc.fn_id"]),
+		IsID:           strings.TrimSpace(bead.Metadata["gc.is_id"]),
+		EsID:           strings.TrimSpace(bead.Metadata["gc.es_id"]),
+		EpID:           strings.TrimSpace(bead.Metadata["gc.ep_id"]),
+		FormID:         strings.TrimSpace(bead.Metadata["gc.form_id"]),
+		FactoryAttempt: fidelityFactoryAttempt(bead),
+		BeadID:         bead.ID,
+	}
+	for key, value := range parseFidelityLineageDescription(bead.Description) {
+		switch key {
+		case "fn":
+			if lineage.FnID == "" {
+				lineage.FnID = value
+			}
+		case "is":
+			if lineage.IsID == "" {
+				lineage.IsID = value
+			}
+		case "es":
+			if lineage.EsID == "" {
+				lineage.EsID = value
+			}
+		case "ep":
+			if lineage.EpID == "" {
+				lineage.EpID = value
+			}
+		case "form":
+			if lineage.FormID == "" {
+				lineage.FormID = value
+			}
+		case "attempt":
+			if lineage.FactoryAttempt == defaultFidelityFactoryAttempt {
+				if n, err := strconv.Atoi(value); err == nil && n > 0 {
+					lineage.FactoryAttempt = n
+				}
+			}
+		}
+	}
+	return lineage
+}
+
+var fidelityLineagePattern = regexp.MustCompile(`\b(fn|is|es|ep|form|attempt)=([^\s]+)`)
+
+func parseFidelityLineageDescription(description string) map[string]string {
+	matches := fidelityLineagePattern.FindAllStringSubmatch(description, -1)
+	out := make(map[string]string, len(matches))
+	for _, match := range matches {
+		if len(match) == 3 {
+			out[match[1]] = strings.TrimSpace(match[2])
+		}
+	}
+	return out
 }
 
 // fidelityResponseFrom copies the provider response into the job-embedded
@@ -279,7 +340,7 @@ func fidelityFactoryAttempt(bead beads.Bead) int {
 	if v, err := strconv.Atoi(bead.Metadata["gc.factory_attempt"]); err == nil {
 		return v
 	}
-	return 1
+	return defaultFidelityFactoryAttempt
 }
 
 // fidelityMaxAmendmentDepth parses gc.max_iterations, defaulting to 5.
@@ -296,6 +357,13 @@ func webhookHmacKeyid(bead beads.Bead) string {
 		return k
 	}
 	return defaultFidelityWebhookKeyID
+}
+
+func fidelityWebhookURL(bead beads.Bead) string {
+	if url := strings.TrimSpace(bead.Metadata["gc.ff_webhook_url"]); url != "" {
+		return url
+	}
+	return defaultFidelityWebhookURL
 }
 
 // fidelityExitCode extracts the process exit code from a *exec.ExitError. A nil

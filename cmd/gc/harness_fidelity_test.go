@@ -192,6 +192,39 @@ func TestFidelityValidatorFactoryAttemptIsInteger(t *testing.T) {
 	}
 }
 
+func TestFidelityValidatorLineageFallsBackToDescription(t *testing.T) {
+	bead := beads.Bead{
+		ID:          "gc-release-1",
+		Description: "**Factory lineage:** fn=FN-DESC is=IS-DESC es=ES-DESC ep=EP-DESC form=FORM-DESC attempt=3\n",
+		Metadata: map[string]string{
+			"gc.rig_root": t.TempDir(),
+		},
+	}
+
+	job := buildFidelityJob(bead, harness.ExecutionResponse{Status: harness.StatusCompleted})
+	if job.Lineage.FnID != "FN-DESC" {
+		t.Errorf("FnID = %q, want FN-DESC", job.Lineage.FnID)
+	}
+	if job.Lineage.IsID != "IS-DESC" {
+		t.Errorf("IsID = %q, want IS-DESC", job.Lineage.IsID)
+	}
+	if job.Lineage.EsID != "ES-DESC" {
+		t.Errorf("EsID = %q, want ES-DESC", job.Lineage.EsID)
+	}
+	if job.Lineage.EpID != "EP-DESC" {
+		t.Errorf("EpID = %q, want EP-DESC", job.Lineage.EpID)
+	}
+	if job.Lineage.FormID != "FORM-DESC" {
+		t.Errorf("FormID = %q, want FORM-DESC", job.Lineage.FormID)
+	}
+	if job.Lineage.FactoryAttempt != 3 {
+		t.Errorf("FactoryAttempt = %d, want 3", job.Lineage.FactoryAttempt)
+	}
+	if job.Webhook.URL == "" {
+		t.Fatalf("Webhook.URL is empty")
+	}
+}
+
 // policy_events must serialize as [] not null when the response carries none.
 func TestFidelityValidatorPolicyEventsEmptyArray(t *testing.T) {
 	writeFakeFidelityScript(t, 0)

@@ -171,6 +171,19 @@ type ProviderSpec struct {
 	// backup_restore). The registry matches a step's runtime_requirements
 	// against this set during selection.
 	CapabilityKeys []string `toml:"capability_keys,omitempty"`
+	// Token is the bearer token a harness runtime provider sends on each call
+	// to its endpoint (Authorization: Bearer <token>). The ff-pipeline Worker's
+	// /__pi-container/* routes require it (operator control auth). Only read for
+	// [provider.*] (singular) harness-registry blocks. Prefer TokenEnv so the
+	// secret is supplied by the container environment rather than committed in
+	// city.toml.
+	Token string `toml:"token,omitempty"`
+	// TokenEnv names an environment variable the operator sets in the harness
+	// container (e.g. "OPERATOR_CONTROL_TOKEN"). When Token is empty and
+	// TokenEnv is set, the resolved Token is read from os.Getenv(TokenEnv) by
+	// HarnessProviderBlocks. This keeps the secret out of city.toml: the TOML
+	// only names the env var. Only read for [provider.*] harness-registry blocks.
+	TokenEnv string `toml:"token_env,omitempty"`
 }
 
 // Reserved prefixes for the Base field.

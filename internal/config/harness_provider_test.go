@@ -80,6 +80,69 @@ func TestHarnessProviderBlocks(t *testing.T) {
 	}
 }
 
+// The bearer token resolves from the literal Token when set; otherwise it is
+// read from the named TokenEnv environment variable. This keeps the operator
+// control secret out of city.toml: the TOML only names the env var
+// (e.g. OPERATOR_CONTROL_TOKEN), and the operator supplies the value via the
+// harness container environment. Gap 2 closure for the pi-rpc provider.
+func TestHarnessProviderBlocks_TokenResolution(t *testing.T) {
+	t.Run("literal token wins over env var", func(t *testing.T) {
+		t.Setenv("FF_TEST_OPERATOR_TOKEN", "from-env")
+		cfg := &City{
+			Provider: map[string]ProviderSpec{
+				"pi-rpc": {URL: "https://ff-pipeline.test", Token: "literal", TokenEnv: "FF_TEST_OPERATOR_TOKEN"},
+			},
+		}
+		blocks := cfg.HarnessProviderBlocks()
+		if blocks[0].Token != "literal" {
+			t.Fatalf("Token = %q, want %q (literal must win)", blocks[0].Token, "literal")
+		}
+		if blocks[0].TokenEnv != "FF_TEST_OPERATOR_TOKEN" {
+			t.Fatalf("TokenEnv = %q, want %q", blocks[0].TokenEnv, "FF_TEST_OPERATOR_TOKEN")
+		}
+	})
+
+	t.Run("empty token resolves from env var", func(t *testing.T) {
+		t.Setenv("FF_TEST_OPERATOR_TOKEN", "from-env")
+		cfg := &City{
+			Provider: map[string]ProviderSpec{
+				"pi-rpc": {URL: "https://ff-pipeline.test", TokenEnv: "FF_TEST_OPERATOR_TOKEN"},
+			},
+		}
+		blocks := cfg.HarnessProviderBlocks()
+		if blocks[0].Token != "from-env" {
+			t.Fatalf("Token = %q, want %q (resolved from TokenEnv)", blocks[0].Token, "from-env")
+		}
+	})
+
+	t.Run("empty token and unset env yields empty token", func(t *testing.T) {
+		cfg := &City{
+			Provider: map[string]ProviderSpec{
+				"pi-rpc": {URL: "https://ff-pipeline.test", TokenEnv: "FF_TEST_OPERATOR_TOKEN_UNSET"},
+			},
+		}
+		blocks := cfg.HarnessProviderBlocks()
+		if blocks[0].Token != "" {
+			t.Fatalf("Token = %q, want empty (env var unset)", blocks[0].Token)
+		}
+		if blocks[0].TokenEnv != "FF_TEST_OPERATOR_TOKEN_UNSET" {
+			t.Fatalf("TokenEnv = %q, want %q", blocks[0].TokenEnv, "FF_TEST_OPERATOR_TOKEN_UNSET")
+		}
+	})
+
+	t.Run("no token fields yields empty token", func(t *testing.T) {
+		cfg := &City{
+			Provider: map[string]ProviderSpec{
+				"pi-rpc": {URL: "https://ff-pipeline.test"},
+			},
+		}
+		blocks := cfg.HarnessProviderBlocks()
+		if blocks[0].Token != "" || blocks[0].TokenEnv != "" {
+			t.Fatalf("Token=%q TokenEnv=%q, want both empty", blocks[0].Token, blocks[0].TokenEnv)
+		}
+	})
+}
+
 // Blocks are returned in a stable (id-sorted) order so registry preference and
 // replay are deterministic (AC-REG2 determinism).
 func TestHarnessProviderBlocks_DeterministicOrder(t *testing.T) {

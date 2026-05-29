@@ -1979,6 +1979,8 @@ func TestMergeProviderOverBuiltinFieldSync(t *testing.T) {
 		URL:                    "https://ff-pipeline.koales.workers.dev",
 		HarnessSlots:           []string{"E", "T", "C", "S", "L", "V", "G", "P"},
 		CapabilityKeys:         []string{"ai_reasoning"},
+		Token:                  "test-static-token",
+		TokenEnv:               "OPERATOR_CONTROL_TOKEN",
 	}
 
 	// Verify every field on city is non-zero (catches new fields not added to test data).

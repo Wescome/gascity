@@ -363,6 +363,12 @@ func MergeProviderOverBuiltin(base, city ProviderSpec) ProviderSpec {
 	if city.CapabilityKeys != nil {
 		result.CapabilityKeys = city.CapabilityKeys
 	}
+	if city.Token != "" {
+		result.Token = city.Token
+	}
+	if city.TokenEnv != "" {
+		result.TokenEnv = city.TokenEnv
+	}
 
 	return result
 }

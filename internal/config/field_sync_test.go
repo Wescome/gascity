@@ -470,6 +470,8 @@ func TestProviderFieldSync(t *testing.T) {
 		"URL":            "harness registry provider endpoint, not patched",
 		"HarnessSlots":   "harness tuple declaration, registry-only, not patched",
 		"CapabilityKeys": "harness capability declaration, registry-only, not patched",
+		"Token":          "harness registry bearer token, registry-only credential, not patched",
+		"TokenEnv":       "harness registry bearer token env-var name, registry-only, not patched",
 	}
 
 	// Fields on ProviderPatch that don't map 1:1 to ProviderSpec.

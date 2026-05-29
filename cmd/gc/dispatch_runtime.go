@@ -434,7 +434,7 @@ func drainWorkflowServeWork(agentCfg config.Agent, cityPath, storePath, workQuer
 	result := workflowServeDrainResult{}
 	idlePolls := 0
 	for {
-		queue, err := workflowServeList(workflowServeWorkQuery(agentCfg, workQuery), storePath, workEnv)
+		queue, err := workflowServeQueue(agentCfg, cityPath, storePath, workQuery, workEnv)
 		if err != nil {
 			workflowTracef("serve query-error agent=%s err=%v", agentCfg.QualifiedName(), err)
 			return result, fmt.Errorf("querying control work for %s: %w", agentCfg.QualifiedName(), err)
@@ -512,6 +512,39 @@ func drainWorkflowServeWork(agentCfg config.Agent, cityPath, storePath, workQuer
 			return result, nil
 		}
 	}
+}
+
+func workflowServeQueue(agentCfg config.Agent, cityPath, storePath, workQuery string, workEnv map[string]string) ([]hookBead, error) {
+	if isWorkflowServeControlDispatcherAgent(agentCfg) {
+		store, err := openStoreAtForCity(storePath, cityPath)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]struct{}{}
+		var ready []beads.Bead
+		for _, assignee := range []string{agentCfg.QualifiedName(), config.NamedSessionRuntimeName(loadedCityName(nil, cityPath), config.Workspace{}, agentCfg.QualifiedName())} {
+			if strings.TrimSpace(assignee) == "" {
+				continue
+			}
+			items, err := store.Ready(beads.ReadyQuery{Assignee: assignee, Limit: workflowServeScanLimit})
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range items {
+				if _, ok := seen[item.ID]; ok {
+					continue
+				}
+				seen[item.ID] = struct{}{}
+				ready = append(ready, item)
+			}
+		}
+		queue := make([]hookBead, 0, len(ready))
+		for _, bead := range ready {
+			queue = append(queue, hookBead{ID: bead.ID, Metadata: hookBeadMetadata(bead.Metadata)})
+		}
+		return queue, nil
+	}
+	return workflowServeList(workflowServeWorkQuery(agentCfg, workQuery), storePath, workEnv)
 }
 
 func isLegacyOversizedControlEventError(err error) bool {

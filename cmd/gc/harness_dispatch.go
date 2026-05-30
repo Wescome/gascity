@@ -229,6 +229,13 @@ func harnessExecutionRequestForBead(bead beads.Bead, cfg *config.City, cityPath 
 	if sessionID == "" {
 		sessionID = bead.ID
 	}
+	// AC-7: populate SeedWorkspace input from bead metadata if present.
+	// The formula compiler writes the full SeedWorkspace JSON as gc.seed_workspace
+	// at bead-create time (IS-WORKSPACE-SEEDING AC-6).
+	inputs := map[string]string{}
+	if sw := strings.TrimSpace(bead.Metadata["gc.seed_workspace"]); sw != "" {
+		inputs["SeedWorkspace"] = sw
+	}
 	return harness.ExecutionRequest{
 		CityID:          cityID,
 		SessionID:       sessionID,
@@ -240,6 +247,7 @@ func harnessExecutionRequestForBead(bead beads.Bead, cfg *config.City, cityPath 
 		RoleName:        bead.Assignee,
 		Purpose:         bead.Title,
 		DeclaredOutputs: declaredOutputs,
+		Inputs:          inputs,
 		RuntimeConfig:   map[string]any{},
 		Policy:          harnessPolicyForRequirements(reqs),
 		ContextRefs: harness.ContextRefs{

@@ -195,6 +195,43 @@ func TestHarnessExecutionRequestExtractsDeclaredOutputs(t *testing.T) {
 	}
 }
 
+// IS-WORKSPACE-SEEDING AC-7: a bead carrying gc.seed_workspace metadata
+// populates req.Inputs["SeedWorkspace"] with the full SeedWorkspace JSON.
+func TestHarnessExecutionRequestPopulatesSeedWorkspaceInput(t *testing.T) {
+	const seedJSON = `{"schemaVersion":"1.0","files":[]}`
+	bead := beads.Bead{
+		ID:    "gc-seed-1",
+		Title: "Implement",
+		Metadata: map[string]string{
+			"gc.root_bead_id":   "gc-root",
+			"gc.seed_workspace": seedJSON,
+		},
+	}
+	req := harnessExecutionRequestForBead(bead, &config.City{}, t.TempDir(), []string{"workspace_write_scope"})
+	if got := req.Inputs["SeedWorkspace"]; got != seedJSON {
+		t.Fatalf("Inputs[\"SeedWorkspace\"] = %q, want %q", got, seedJSON)
+	}
+}
+
+// A bead with no gc.seed_workspace metadata yields an empty (non-nil) Inputs
+// map and no SeedWorkspace entry.
+func TestHarnessExecutionRequestOmitsSeedWorkspaceWhenAbsent(t *testing.T) {
+	bead := beads.Bead{
+		ID:    "gc-seed-2",
+		Title: "Implement",
+		Metadata: map[string]string{
+			"gc.root_bead_id": "gc-root",
+		},
+	}
+	req := harnessExecutionRequestForBead(bead, &config.City{}, t.TempDir(), []string{"workspace_write_scope"})
+	if req.Inputs == nil {
+		t.Fatalf("Inputs is nil, want empty map")
+	}
+	if len(req.Inputs) != 0 {
+		t.Fatalf("Inputs = %#v, want empty map", req.Inputs)
+	}
+}
+
 // A step whose requirements match no provider fails closed: the bead is marked
 // failed and the error wraps ErrNoProviderForRequirements. It never silently
 // falls through to the legacy path.

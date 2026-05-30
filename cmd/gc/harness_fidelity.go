@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -237,18 +238,41 @@ func fidelityPriorStepVerdicts(store beads.Store, bead beads.Bead, stderr io.Wri
 		fidelityLogf(stderr, "fidelity validation: bead=%s sibling lookup error: %v; prior_step_verdicts empty\n", bead.ID, err)
 		return verdicts
 	}
+
+	// Keep only siblings that actually executed (have a stamped response) and
+	// are not the Release step itself, then order them earliest-first so
+	// step_index is stable: 0 = earliest executed prior step.
+	eligible := make([]beads.Bead, 0, len(siblings))
 	for _, sibling := range siblings {
-		raw := strings.TrimSpace(sibling.Metadata["gc.harness_response_json"])
-		if raw == "" {
+		if strings.TrimSpace(sibling.Metadata["gc.harness_response_json"]) == "" {
 			continue
 		}
 		if isHarnessReleaseStep(sibling) {
 			continue
 		}
-		var verdict map[string]any
-		if err := json.Unmarshal([]byte(raw), &verdict); err != nil {
-			fidelityLogf(stderr, "fidelity validation: bead=%s sibling=%s response unmarshal error: %v; skipping\n", bead.ID, sibling.ID, err)
-			continue
+		eligible = append(eligible, sibling)
+	}
+	sort.SliceStable(eligible, func(a, b int) bool {
+		return eligible[a].CreatedAt.Before(eligible[b].CreatedAt)
+	})
+
+	for i, sibling := range eligible {
+		// Build a PriorStepVerdict-shaped object from each sibling bead.
+		// The validator expects {step_index, step_name, outcome, remediation}.
+		// gc.outcome=="pass" → outcome="approved"; anything else → "revise".
+		outcome := "revise"
+		if strings.TrimSpace(sibling.Metadata["gc.outcome"]) == "pass" {
+			outcome = "approved"
+		}
+		stepName := strings.TrimSpace(sibling.Metadata["gc.step_ref"])
+		if stepName == "" {
+			stepName = sibling.Ref
+		}
+		verdict := map[string]any{
+			"step_index":  i, // i is the loop index (0-based, earliest first)
+			"step_name":   stepName,
+			"outcome":     outcome,
+			"remediation": "",
 		}
 		verdicts = append(verdicts, verdict)
 	}

@@ -233,6 +233,9 @@ func TestFidelityPriorStepVerdictsAccumulatesSiblings(t *testing.T) {
 
 	// Two prior steps (Code, Verify) each carry a stamped response. The Release
 	// bead carries a response too but must be excluded from its own envelope.
+	// The verdict envelope must be PriorStepVerdict-shaped: each sibling becomes
+	// {step_index, step_name, outcome, remediation} — gc.outcome=="pass" maps to
+	// outcome="approved", step_name comes from gc.step_ref.
 	codeResp, _ := json.Marshal(harness.ExecutionResponse{Status: harness.StatusCompleted, SessionArchiveRef: "code-archive"})
 	verifyResp, _ := json.Marshal(harness.ExecutionResponse{Status: harness.StatusCompleted, SessionArchiveRef: "verify-archive"})
 	releaseResp, _ := json.Marshal(harness.ExecutionResponse{Status: harness.StatusCompleted, SessionArchiveRef: "release-archive"})
@@ -240,11 +243,15 @@ func TestFidelityPriorStepVerdictsAccumulatesSiblings(t *testing.T) {
 	code, _ := store.Create(beads.Bead{Title: "code step", Type: "task"})
 	_ = store.Update(code.ID, beads.UpdateOpts{Metadata: map[string]string{
 		"gc.root_bead_id":          root,
+		"gc.step_ref":              "code",
+		"gc.outcome":               "pass",
 		"gc.harness_response_json": string(codeResp),
 	}})
 	verify, _ := store.Create(beads.Bead{Title: "verify step", Type: "task"})
 	_ = store.Update(verify.ID, beads.UpdateOpts{Metadata: map[string]string{
 		"gc.root_bead_id":          root,
+		"gc.step_ref":              "verify",
+		"gc.outcome":               "pass",
 		"gc.harness_response_json": string(verifyResp),
 	}})
 	release, _ := store.Create(beads.Bead{Title: "release step", Type: "task"})
@@ -259,19 +266,66 @@ func TestFidelityPriorStepVerdictsAccumulatesSiblings(t *testing.T) {
 	if len(verdicts) != 2 {
 		t.Fatalf("prior_step_verdicts len = %d, want 2 (Code+Verify, Release excluded)", len(verdicts))
 	}
-	seen := map[string]bool{}
-	for _, v := range verdicts {
+
+	// Verdicts are earliest-first: index 0 = code, index 1 = verify.
+	wantNames := []string{"code", "verify"}
+	for i, v := range verdicts {
 		m, ok := v.(map[string]any)
 		if !ok {
-			t.Fatalf("verdict wrong type: %T", v)
+			t.Fatalf("verdict[%d] wrong type: %T", i, v)
 		}
-		seen[m["session_archive_ref"].(string)] = true
+		if got := m["step_index"]; got != i {
+			t.Errorf("verdict[%d] step_index = %v, want %d", i, got, i)
+		}
+		if got := m["step_name"]; got != wantNames[i] {
+			t.Errorf("verdict[%d] step_name = %v, want %q", i, got, wantNames[i])
+		}
+		if got := m["outcome"]; got != "approved" {
+			t.Errorf("verdict[%d] outcome = %v, want approved", i, got)
+		}
+		if got := m["remediation"]; got != "" {
+			t.Errorf("verdict[%d] remediation = %v, want empty", i, got)
+		}
+		if _, hasRaw := m["session_archive_ref"]; hasRaw {
+			t.Errorf("verdict[%d] leaked raw ExecutionResponse field session_archive_ref", i)
+		}
 	}
-	if !seen["code-archive"] || !seen["verify-archive"] {
-		t.Errorf("missing prior verdicts: seen=%v", seen)
+}
+
+// A sibling whose gc.outcome is not "pass" maps to outcome="revise".
+func TestFidelityPriorStepVerdictsNonPassMapsToRevise(t *testing.T) {
+	store := beads.NewMemStore()
+	const root = "root-mol-revise"
+
+	resp, _ := json.Marshal(harness.ExecutionResponse{Status: harness.StatusCompleted})
+	code, _ := store.Create(beads.Bead{Title: "code step", Type: "task"})
+	_ = store.Update(code.ID, beads.UpdateOpts{Metadata: map[string]string{
+		"gc.root_bead_id":          root,
+		"gc.step_ref":              "code",
+		"gc.outcome":               "fail",
+		"gc.harness_response_json": string(resp),
+	}})
+	release, _ := store.Create(beads.Bead{Title: "release step", Type: "task"})
+	_ = store.Update(release.ID, beads.UpdateOpts{Metadata: map[string]string{
+		"gc.root_bead_id":          root,
+		"gc.step_ref":              "release",
+		"gc.harness_response_json": string(resp),
+	}})
+
+	releaseBead, _ := store.Get(release.ID)
+	verdicts := fidelityPriorStepVerdicts(store, releaseBead, nil)
+	if len(verdicts) != 1 {
+		t.Fatalf("prior_step_verdicts len = %d, want 1", len(verdicts))
 	}
-	if seen["release-archive"] {
-		t.Errorf("release step verdict must be excluded from its own envelope")
+	m := verdicts[0].(map[string]any)
+	if got := m["outcome"]; got != "revise" {
+		t.Errorf("outcome = %v, want revise (gc.outcome=fail)", got)
+	}
+	if got := m["step_index"]; got != 0 {
+		t.Errorf("step_index = %v, want 0", got)
+	}
+	if got := m["step_name"]; got != "code" {
+		t.Errorf("step_name = %v, want code", got)
 	}
 }
 

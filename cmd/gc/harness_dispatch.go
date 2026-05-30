@@ -153,6 +153,20 @@ func maybeDispatchHarness(ctx context.Context, store beads.Store, bead beads.Bea
 		return harnessDispatchOutcome{Attempted: false}, nil
 	}
 
+	// Terminator (Release) steps skip remote provider selection. The fidelity
+	// validator runs locally against the supervisor-held molecule evidence;
+	// no remote ExecuteStep call is needed or correct (see harness_fidelity.go).
+	if isHarnessReleaseStep(bead) {
+		synthResp := harness.ExecutionResponse{
+			Status:       harness.StatusCompleted,
+			PolicyEvents: []harness.PolicyEvent{},
+		}
+		if fidErr := runFidelityValidator(ctx, store, bead, cfg, cityPath, synthResp, stderr); fidErr != nil {
+			return harnessDispatchOutcome{Attempted: true}, fidErr
+		}
+		return harnessDispatchOutcome{Attempted: true}, nil
+	}
+
 	registry, err := harnessRegistryForConfig(cfg)
 	if err != nil {
 		failHarnessStepClosed(store, bead.ID, "harness_registry_build_failed", err.Error(), stderr)

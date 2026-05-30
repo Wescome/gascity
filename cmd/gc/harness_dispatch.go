@@ -205,7 +205,7 @@ func maybeDispatchHarness(ctx context.Context, store beads.Store, bead beads.Bea
 			failHarnessStepClosed(store, bead.ID, "provider_execution_not_completed", fmt.Sprintf("provider status=%s", resp.Status), stderr)
 			return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, fmt.Errorf("harness dispatch bead=%s provider=%s: provider status=%s", bead.ID, providerID, resp.Status)
 		}
-		closeHarnessStepPassed(store, bead.ID, stderr)
+		closeHarnessStepPassed(store, bead.ID, resp, stderr)
 		return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, nil
 	}
 
@@ -364,15 +364,24 @@ func isHarnessReleaseStep(bead beads.Bead) bool {
 	return strings.Contains(strings.ToLower(bead.Title), "release")
 }
 
-func closeHarnessStepPassed(store beads.Store, beadID string, stderr io.Writer) {
+func closeHarnessStepPassed(store beads.Store, beadID string, resp harness.ExecutionResponse, stderr io.Writer) {
 	closed := "closed"
+	metadata := map[string]string{
+		"gc.outcome":                "pass",
+		"gc.harness_dispatch_state": "completed",
+		"gc.harness_completed_at":   time.Now().UTC().Format(time.RFC3339),
+	}
+	// Stamp the serialized response so the Release step can accumulate prior
+	// step verdicts from sibling beads (E2 envelope accumulation). Marshaling
+	// failure is non-fatal: prior verdicts become partial, not zero.
+	if respJSON, err := json.Marshal(resp); err != nil {
+		_, _ = fmt.Fprintf(stderr, "harness dispatch: bead=%s response marshal error: %v\n", beadID, err)
+	} else {
+		metadata["gc.harness_response_json"] = string(respJSON)
+	}
 	if err := store.Update(beadID, beads.UpdateOpts{
-		Status: &closed,
-		Metadata: map[string]string{
-			"gc.outcome":                "pass",
-			"gc.harness_dispatch_state": "completed",
-			"gc.harness_completed_at":   time.Now().UTC().Format(time.RFC3339),
-		},
+		Status:   &closed,
+		Metadata: metadata,
 	}); err != nil {
 		_, _ = fmt.Fprintf(stderr, "harness dispatch: bead=%s pass update error: %v\n", beadID, err)
 	}

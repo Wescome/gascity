@@ -201,7 +201,7 @@ func TestFidelityValidatorLineageFallsBackToDescription(t *testing.T) {
 		},
 	}
 
-	job := buildFidelityJob(bead, harness.ExecutionResponse{Status: harness.StatusCompleted})
+	job := buildFidelityJob(beads.NewMemStore(), bead, harness.ExecutionResponse{Status: harness.StatusCompleted})
 	if job.Lineage.FnID != "FN-DESC" {
 		t.Errorf("FnID = %q, want FN-DESC", job.Lineage.FnID)
 	}
@@ -222,6 +222,69 @@ func TestFidelityValidatorLineageFallsBackToDescription(t *testing.T) {
 	}
 	if job.Webhook.URL == "" {
 		t.Fatalf("Webhook.URL is empty")
+	}
+}
+
+// PriorStepVerdicts accumulates the serialized responses stamped on sibling
+// beads sharing a gc.root_bead_id, excluding the Release step itself.
+func TestFidelityPriorStepVerdictsAccumulatesSiblings(t *testing.T) {
+	store := beads.NewMemStore()
+	const root = "root-mol-1"
+
+	// Two prior steps (Code, Verify) each carry a stamped response. The Release
+	// bead carries a response too but must be excluded from its own envelope.
+	codeResp, _ := json.Marshal(harness.ExecutionResponse{Status: harness.StatusCompleted, SessionArchiveRef: "code-archive"})
+	verifyResp, _ := json.Marshal(harness.ExecutionResponse{Status: harness.StatusCompleted, SessionArchiveRef: "verify-archive"})
+	releaseResp, _ := json.Marshal(harness.ExecutionResponse{Status: harness.StatusCompleted, SessionArchiveRef: "release-archive"})
+
+	code, _ := store.Create(beads.Bead{Title: "code step", Type: "task"})
+	_ = store.Update(code.ID, beads.UpdateOpts{Metadata: map[string]string{
+		"gc.root_bead_id":          root,
+		"gc.harness_response_json": string(codeResp),
+	}})
+	verify, _ := store.Create(beads.Bead{Title: "verify step", Type: "task"})
+	_ = store.Update(verify.ID, beads.UpdateOpts{Metadata: map[string]string{
+		"gc.root_bead_id":          root,
+		"gc.harness_response_json": string(verifyResp),
+	}})
+	release, _ := store.Create(beads.Bead{Title: "release step", Type: "task"})
+	_ = store.Update(release.ID, beads.UpdateOpts{Metadata: map[string]string{
+		"gc.root_bead_id":          root,
+		"gc.step_ref":              "release",
+		"gc.harness_response_json": string(releaseResp),
+	}})
+
+	releaseBead, _ := store.Get(release.ID)
+	verdicts := fidelityPriorStepVerdicts(store, releaseBead, nil)
+	if len(verdicts) != 2 {
+		t.Fatalf("prior_step_verdicts len = %d, want 2 (Code+Verify, Release excluded)", len(verdicts))
+	}
+	seen := map[string]bool{}
+	for _, v := range verdicts {
+		m, ok := v.(map[string]any)
+		if !ok {
+			t.Fatalf("verdict wrong type: %T", v)
+		}
+		seen[m["session_archive_ref"].(string)] = true
+	}
+	if !seen["code-archive"] || !seen["verify-archive"] {
+		t.Errorf("missing prior verdicts: seen=%v", seen)
+	}
+	if seen["release-archive"] {
+		t.Errorf("release step verdict must be excluded from its own envelope")
+	}
+}
+
+// An empty gc.root_bead_id yields an empty (non-nil) verdict slice, not a panic.
+func TestFidelityPriorStepVerdictsEmptyRootIsNonFatal(t *testing.T) {
+	store := beads.NewMemStore()
+	bead := beads.Bead{ID: "lone", Metadata: map[string]string{}}
+	verdicts := fidelityPriorStepVerdicts(store, bead, nil)
+	if verdicts == nil {
+		t.Fatal("verdicts is nil, want empty slice")
+	}
+	if len(verdicts) != 0 {
+		t.Errorf("verdicts len = %d, want 0", len(verdicts))
 	}
 }
 

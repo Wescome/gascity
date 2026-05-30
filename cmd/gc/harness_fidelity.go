@@ -131,7 +131,7 @@ type fidelityJob struct {
 func runFidelityValidator(ctx context.Context, store beads.Store, bead beads.Bead, cfg *config.City, cityPath string, resp harness.ExecutionResponse, stderr io.Writer) error {
 	rigRoot := fidelityRigRoot(bead, cityPath)
 
-	job := buildFidelityJob(bead, resp)
+	job := buildFidelityJob(store, bead, resp)
 	if err := writeFidelityJob(rigRoot, job); err != nil {
 		return fmt.Errorf("fidelity job bead=%s: %w", bead.ID, err)
 	}
@@ -187,8 +187,11 @@ func fidelityRigRoot(bead beads.Bead, cityPath string) string {
 }
 
 // buildFidelityJob assembles the fidelity job document from bead lineage
-// metadata and the provider response.
-func buildFidelityJob(bead beads.Bead, resp harness.ExecutionResponse) fidelityJob {
+// metadata and the provider response. DeclaredOutputs is read from the Release
+// bead; PriorStepVerdicts is accumulated from the serialized responses stamped
+// on sibling beads (E2 envelope accumulation). Without these the fidelity
+// validator fails closed on empty prior verdicts regardless of routing.
+func buildFidelityJob(store beads.Store, bead beads.Bead, resp harness.ExecutionResponse) fidelityJob {
 	lineage := fidelityLineageFromBead(bead)
 	return fidelityJob{
 		StepName:      "release",
@@ -202,8 +205,8 @@ func buildFidelityJob(bead beads.Bead, resp harness.ExecutionResponse) fidelityJ
 			FactoryAttempt: lineage.FactoryAttempt,
 			BeadID:         bead.ID,
 		},
-		DeclaredOutputs:   []string{},
-		PriorStepVerdicts: []any{},
+		DeclaredOutputs:   harnessDeclaredOutputsForBead(bead),
+		PriorStepVerdicts: fidelityPriorStepVerdicts(store, bead, os.Stderr),
 		Response:          fidelityResponseFrom(resp),
 		Convergence: fidelityConvergence{
 			MaxAmendmentDepth: fidelityMaxAmendmentDepth(bead),
@@ -214,6 +217,51 @@ func buildFidelityJob(bead beads.Bead, resp harness.ExecutionResponse) fidelityJ
 			KeyID:      webhookHmacKeyid(bead),
 		},
 	}
+}
+
+// fidelityPriorStepVerdicts accumulates the serialized provider responses
+// stamped on sibling beads (gc.harness_response_json) into the prior-step
+// verdict envelope the fidelity validator consumes. Sibling beads are found by
+// shared gc.root_bead_id; the Release step itself is excluded (it has no prior
+// verdict of its own). On a missing root id or store error the slice is empty
+// (non-fatal): prior verdicts become partial, not a hard failure.
+func fidelityPriorStepVerdicts(store beads.Store, bead beads.Bead, stderr io.Writer) []any {
+	verdicts := []any{}
+	rootBeadID := strings.TrimSpace(bead.Metadata["gc.root_bead_id"])
+	if rootBeadID == "" {
+		fidelityLogf(stderr, "fidelity validation: bead=%s no gc.root_bead_id; prior_step_verdicts empty\n", bead.ID)
+		return verdicts
+	}
+	siblings, err := store.ListByMetadata(map[string]string{"gc.root_bead_id": rootBeadID}, 0, beads.IncludeClosed)
+	if err != nil {
+		fidelityLogf(stderr, "fidelity validation: bead=%s sibling lookup error: %v; prior_step_verdicts empty\n", bead.ID, err)
+		return verdicts
+	}
+	for _, sibling := range siblings {
+		raw := strings.TrimSpace(sibling.Metadata["gc.harness_response_json"])
+		if raw == "" {
+			continue
+		}
+		if isHarnessReleaseStep(sibling) {
+			continue
+		}
+		var verdict map[string]any
+		if err := json.Unmarshal([]byte(raw), &verdict); err != nil {
+			fidelityLogf(stderr, "fidelity validation: bead=%s sibling=%s response unmarshal error: %v; skipping\n", bead.ID, sibling.ID, err)
+			continue
+		}
+		verdicts = append(verdicts, verdict)
+	}
+	return verdicts
+}
+
+// fidelityLogf writes to stderr when non-nil, tolerating a nil writer so
+// callers that lack a stderr handle (buildFidelityJob) stay non-fatal.
+func fidelityLogf(stderr io.Writer, format string, args ...any) {
+	if stderr == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(stderr, format, args...)
 }
 
 func fidelityLineageFromBead(bead beads.Bead) fidelityLineage {

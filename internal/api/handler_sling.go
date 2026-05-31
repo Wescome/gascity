@@ -60,7 +60,7 @@ var apiSlingStderr = func() io.Writer { return os.Stderr }
 //     keeps Huma's structured error path available without widening the
 //     (*slingResponse, int, string, string) shape every non-conflict
 //     caller already consumes.
-func (s *Server) execSling(ctx context.Context, body slingBody, _ string) (*slingResponse, int, string, string, *sourceworkflow.ConflictError) {
+func (s *Server) execSling(ctx context.Context, body slingBody, traceID string) (*slingResponse, int, string, string, *sourceworkflow.ConflictError) {
 	cfg := s.state.Config()
 	agentCfg, _ := findAgent(cfg, body.Target)
 
@@ -191,6 +191,11 @@ func (s *Server) execSling(ctx context.Context, body slingBody, _ string) (*slin
 	// Use structured result fields directly -- no stdout parsing needed.
 	resp.WorkflowID = result.WorkflowID
 	resp.RootBeadID = result.BeadID
+	if traceID != "" && result.BeadID != "" {
+		if err := store.SetMetadata(result.BeadID, "gc.trace_id", strings.TrimSpace(traceID)); err != nil {
+			fmt.Fprintf(apiSlingStderr(), "gc api sling: setting gc.trace_id on %s: %v\n", result.BeadID, err) //nolint:errcheck
+		}
+	}
 	if resp.WorkflowID == "" && resp.RootBeadID == "" {
 		return nil, http.StatusInternalServerError, "internal", "sling did not produce a workflow or bead id", nil
 	}

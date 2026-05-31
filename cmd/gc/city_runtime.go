@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -117,6 +119,8 @@ type CityRuntime struct {
 	forceStopShutdown        *atomic.Bool
 	logPrefix                string // "gc start" or "gc supervisor"
 	stdout, stderr           io.Writer
+	obsEmitter               *telemetry.Emitter
+	startupTraceID           string
 }
 
 const runtimeDemandSnapshotMaxAge = 30 * time.Second
@@ -298,6 +302,8 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 		logPrefix:         logPrefix,
 		stdout:            p.Stdout,
 		stderr:            p.Stderr,
+		obsEmitter:        telemetry.NewQueueEmitterFromEnv(),
+		startupTraceID:    newObservabilityID(),
 	}
 	cr.svc = workspacesvc.NewManager(&serviceRuntime{cr: cr})
 	if err := cr.svc.Reload(); err != nil {
@@ -311,6 +317,34 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 		fmt.Fprintf(cr.stderr, "%s: harness registry init: %v\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
 	}
 	return cr
+}
+
+func newObservabilityID() string {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
+}
+
+func (cr *CityRuntime) emitStartupEvent(name, outcome string, started time.Time, err error, attrs map[string]interface{}) {
+	if cr == nil || cr.obsEmitter == nil || !cr.obsEmitter.Enabled() {
+		return
+	}
+	e := telemetry.TelemetryEvent{
+		TraceID:     cr.startupTraceID,
+		SpanID:      newObservabilityID(),
+		Name:        name,
+		Service:     "gascity",
+		StartTimeMS: started.UnixMilli(),
+		DurationMS:  time.Since(started).Milliseconds(),
+		Outcome:     outcome,
+		Attrs:       attrs,
+	}
+	if err != nil {
+		e.Error = err.Error()
+	}
+	cr.obsEmitter.Emit(e)
 }
 
 // setControllerState sets the API state for this city. The controller
@@ -420,9 +454,15 @@ func (cr *CityRuntime) run(ctx context.Context) {
 	// Runs on every startup (rerunnable, crash-safe).
 	adoptionComplete := false
 	if !retryStartupStep("adoption-barrier", func() bool { return adoptionComplete }, func() {
+		adoptStart := time.Now()
 		if cr.onStatus != nil {
 			cr.onStatus("adopting_sessions")
 		}
+		cr.emitStartupEvent("city.start.phase.enter", "success", adoptStart, nil, map[string]interface{}{
+			"city":           cr.cityName,
+			"phase":          "adopting_sessions",
+			"beads_provider": cr.cfg.Beads.Provider,
+		})
 		if cr.cityBeadStore() != nil {
 			result, passed := runAdoptionBarrier(cr.cityPath, cr.cityBeadStore(), cr.sp, cr.cfg, cr.cityName, clock.Real{}, cr.stderr, false)
 			if result.Adopted > 0 {
@@ -434,9 +474,13 @@ func (cr *CityRuntime) run(ctx context.Context) {
 				// sessions). They will be cleaned up when they naturally exit.
 				// Sessions with matching agents get beads via syncSessionBeads
 				// on the next tick.
-				fmt.Fprintf(cr.stderr, "%s: adoption barrier: %d session(s) failed bead creation\n", cr.logPrefix, result.Skipped) //nolint:errcheck
+				fmt.Fprintf(cr.stderr, "%s: adoption barrier failed (skipped=%d total=%d); continuing startup\n", cr.logPrefix, result.Skipped, result.Total) //nolint:errcheck
 			}
 		}
+		cr.emitStartupEvent("city.start.phase.exit", "success", adoptStart, nil, map[string]interface{}{
+			"city":  cr.cityName,
+			"phase": "adopting_sessions",
+		})
 		adoptionComplete = true
 	}) {
 		return
@@ -561,9 +605,25 @@ func (cr *CityRuntime) run(ctx context.Context) {
 	if cr.onStatus != nil {
 		cr.onStatus("starting_agents")
 	}
+	startingAgents := time.Now()
+	cr.emitStartupEvent("city.start.phase.enter", "success", startingAgents, nil, map[string]interface{}{
+		"city":           cr.cityName,
+		"phase":          "starting_agents",
+		"beads_provider": cr.cfg.Beads.Provider,
+	})
 	if cr.onStarted != nil {
 		cr.onStarted()
 	}
+	cr.emitStartupEvent("city.start.phase.exit", "success", startingAgents, nil, map[string]interface{}{
+		"city":  cr.cityName,
+		"phase": "starting_agents",
+	})
+	cr.emitStartupEvent("city.start.dispatch_ready", "success", startingAgents, nil, map[string]interface{}{
+		"city":       cr.cityName,
+		"elapsed_ms": time.Since(startingAgents).Milliseconds(),
+		"mode":       "full",
+	})
+	_ = cr.obsEmitter.Flush()
 	fmt.Fprintln(cr.stdout, "City started.") //nolint:errcheck // best-effort stdout
 	if ctx.Err() != nil {
 		return

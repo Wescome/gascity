@@ -13,6 +13,7 @@ package api
 // the edge rather than only at runtime.
 type SlingInput struct {
 	CityScope
+	XTraceID string `header:"X-Trace-ID" required:"false" doc:"Optional trace correlation ID propagated from ff-pipeline dispatch."`
 	Body struct {
 		Rig            string            `json:"rig,omitempty" doc:"Rig name."`
 		Target         string            `json:"target" minLength:"1" doc:"Target agent or pool."`

@@ -89,7 +89,7 @@ func (s *Server) humaHandleSling(ctx context.Context, input *SlingInput) (*Sling
 		}
 	}
 
-	resp, status, code, message, conflict := s.execSling(ctx, body, agentCfg.EffectiveDefaultSlingFormula())
+	resp, status, code, message, conflict := s.execSling(ctx, body, input.XTraceID)
 	if code != "" {
 		if status == http.StatusNotFound {
 			return nil, huma.Error404NotFound(message)

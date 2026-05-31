@@ -23095,6 +23095,15 @@
               "pattern": "\\S",
               "type": "string"
             }
+          },
+          {
+            "description": "Optional trace correlation ID propagated from ff-pipeline dispatch.",
+            "in": "header",
+            "name": "X-Trace-ID",
+            "schema": {
+              "description": "Optional trace correlation ID propagated from ff-pipeline dispatch.",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {

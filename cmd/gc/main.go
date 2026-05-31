@@ -981,6 +981,17 @@ func openStoreAtForCity(storePath, cityPath string) (beads.Store, error) {
 	switch provider {
 	case "file":
 		return openCompatibleFileStore(scopeRoot, runtimeCityPath)
+	case "do":
+		cfg, err := loadCityConfig(runtimeCityPath, io.Discard)
+		if err != nil {
+			return nil, fmt.Errorf("do store: load config: %w", err)
+		}
+		baseURL := os.Getenv(cfg.Beads.Do.URLEnv)
+		token := os.Getenv(cfg.Beads.Do.TokenEnv)
+		if baseURL == "" {
+			return nil, fmt.Errorf("do store: %s not set", cfg.Beads.Do.URLEnv)
+		}
+		return beads.NewDoStore(baseURL, token), nil
 	default: // "bd" or unrecognized → use bd
 		if _, err := exec.LookPath("bd"); err != nil {
 			return nil, fmt.Errorf("bd not found in PATH (install beads or set GC_BEADS=file)")

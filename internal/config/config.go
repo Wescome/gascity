@@ -1128,6 +1128,13 @@ type BeadsConfig struct {
 	// Provider selects the bead store backend: "bd" (default), "file",
 	// or "exec:<script>" for a user-supplied script.
 	Provider string `toml:"provider,omitempty" jsonschema:"default=bd"`
+	// Do configures the Durable Object-backed bead store provider.
+	Do BeadsDoConfig `toml:"do,omitempty"`
+}
+
+type BeadsDoConfig struct {
+	URLEnv   string `toml:"url_env"`
+	TokenEnv string `toml:"token_env"`
 }
 
 // SessionConfig holds session provider settings.

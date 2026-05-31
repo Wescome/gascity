@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/gastownhall/gascity/internal/agent"
 	"github.com/gastownhall/gascity/internal/beads"
@@ -38,6 +39,10 @@ type adoptionDetail struct {
 // e.g., "s-worker-3" -> "3"
 var poolSlotPattern = regexp.MustCompile(`-(\d+)$`)
 
+// adoptionListRunningTimeout bounds startup adoption's session listing so
+// city startup cannot hang indefinitely in adopting_sessions.
+var adoptionListRunningTimeout = 15 * time.Second
+
 // runAdoptionBarrier ensures every running session has a corresponding open
 // session bead. This is rerunnable and crash-safe: if the controller crashes
 // mid-adoption, the next startup re-runs it. The per-instance dedup key
@@ -68,7 +73,7 @@ func runAdoptionBarrier(
 	}
 
 	// Step 1: List all running sessions.
-	running, err := sp.ListRunning("")
+	running, err := listRunningWithTimeout(sp, "", adoptionListRunningTimeout)
 	partialList := runtime.IsPartialListError(err)
 	if err != nil && !partialList {
 		fmt.Fprintf(stderr, "adoption barrier: listing running sessions: %v\n", err) //nolint:errcheck
@@ -267,6 +272,24 @@ func runAdoptionBarrier(
 	// Step 4: Barrier gate — all running sessions must have beads.
 	passed := result.Skipped == 0 && !partialList
 	return result, passed
+}
+
+func listRunningWithTimeout(sp runtime.Provider, prefix string, timeout time.Duration) ([]string, error) {
+	type response struct {
+		running []string
+		err     error
+	}
+	ch := make(chan response, 1)
+	go func() {
+		running, err := sp.ListRunning(prefix)
+		ch <- response{running: running, err: err}
+	}()
+	select {
+	case res := <-ch:
+		return res.running, res.err
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("ListRunning timed out after %s", timeout)
+	}
 }
 
 func openSessionBeadExists(store beads.Store, sessionName string) (bool, error) {

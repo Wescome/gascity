@@ -35,6 +35,7 @@ type fakeAdoptionProvider struct {
 	alive            map[string]bool
 	processNameCalls map[string][]string
 	listErr          error
+	blockList        <-chan struct{}
 }
 
 type adoptionLockProbeStore struct {
@@ -101,6 +102,9 @@ type adoptionBarrierOutcome struct {
 }
 
 func (f *fakeAdoptionProvider) ListRunning(_ string) ([]string, error) {
+	if f.blockList != nil {
+		<-f.blockList
+	}
 	return f.running, f.listErr
 }
 
@@ -142,6 +146,34 @@ func TestAdoptionBarrier_NoRunning(t *testing.T) {
 	}
 	if result.Total != 0 {
 		t.Errorf("Total = %d, want 0", result.Total)
+	}
+}
+
+func TestAdoptionBarrier_ListRunningTimeoutFailsFast(t *testing.T) {
+	store := beads.NewMemStore()
+	block := make(chan struct{})
+	sp := &fakeAdoptionProvider{blockList: block}
+	cfg := &config.City{}
+	var stderr bytes.Buffer
+
+	prev := adoptionListRunningTimeout
+	adoptionListRunningTimeout = 25 * time.Millisecond
+	t.Cleanup(func() { adoptionListRunningTimeout = prev })
+
+	start := time.Now()
+	result, passed := runAdoptionBarrier("", store, sp, cfg, "test-city", clock.Real{}, &stderr, false)
+	elapsed := time.Since(start)
+	if passed {
+		t.Fatal("barrier should fail when ListRunning times out")
+	}
+	if result.Total != 0 {
+		t.Fatalf("Total = %d, want 0 on timeout", result.Total)
+	}
+	if !strings.Contains(stderr.String(), "timed out") {
+		t.Fatalf("stderr = %q, want timeout message", stderr.String())
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("timeout path took too long: %s", elapsed)
 	}
 }
 

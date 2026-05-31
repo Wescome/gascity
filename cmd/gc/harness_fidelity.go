@@ -137,6 +137,12 @@ func runFidelityValidator(ctx context.Context, store beads.Store, bead beads.Bea
 		return fmt.Errorf("fidelity job bead=%s: %w", bead.ID, err)
 	}
 
+	// WP-OBS-4: fidelity.run fires as the release step hands the accumulated
+	// molecule evidence to the validator. prior_step_count is the number of
+	// executed prior-step verdicts the validator will weigh.
+	emitFidelityRun(store, bead, len(job.PriorStepVerdicts))
+	fidelityStart := time.Now()
+
 	cmd := exec.CommandContext(ctx, "bash", fidelityReleaseScriptPath)
 	cmd.Env = append(os.Environ(),
 		"GC_BEAD_ID="+bead.ID,
@@ -156,15 +162,24 @@ func runFidelityValidator(ctx context.Context, store beads.Store, bead beads.Bea
 	switch exitCode {
 	case fidelityExitRelease:
 		// RELEASE was POSTed and accepted; the driver already closed the bead.
+		emitFidelityVerdict(store, bead, "release", fidelityStart)
+		// WP-OBS-4: a clean release closes the molecule root bead. This is the
+		// molecule's terminal outcome and the per-molecule flush point.
+		emitMoleculeComplete(store, bead, "approved", fidelityStart)
 		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=release\n", bead.ID)
 		return nil
 	case fidelityExitRevise:
 		recordFidelityVerdict(store, bead.ID, "revise", stderr)
+		// revise is NOT a molecule-terminal outcome: the molecule re-enters at
+		// the Code step, so no molecule.complete is emitted here.
+		emitFidelityVerdict(store, bead, "revise", fidelityStart)
 		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=revise\n", bead.ID)
 		return ErrFidelityRevise
 	case fidelityExitFailClosed:
 		recordFidelityVerdict(store, bead.ID, "fail_closed", stderr)
 		failHarnessStepClosed(store, bead.ID, "fidelity_fail_closed", ErrFidelityFailClosed.Error(), stderr)
+		emitFidelityVerdict(store, bead, "fail_closed", fidelityStart)
+		emitMoleculeComplete(store, bead, "failed", fidelityStart)
 		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=fail_closed\n", bead.ID)
 		return ErrFidelityFailClosed
 	default:
@@ -173,6 +188,8 @@ func runFidelityValidator(ctx context.Context, store beads.Store, bead beads.Bea
 		// proceed as if the step succeeded.
 		recordFidelityVerdict(store, bead.ID, "fail_closed", stderr)
 		failHarnessStepClosed(store, bead.ID, "fidelity_fail_closed", fmt.Sprintf("fidelity-release.sh exit=%d", exitCode), stderr)
+		emitFidelityVerdict(store, bead, "fail_closed", fidelityStart)
+		emitMoleculeComplete(store, bead, "failed", fidelityStart)
 		_, _ = fmt.Fprintf(stderr, "fidelity validation: bead=%s verdict=fail_closed (unexpected exit=%d)\n", bead.ID, exitCode)
 		return fmt.Errorf("%w: fidelity-release.sh exit=%d", ErrFidelityFailClosed, exitCode)
 	}

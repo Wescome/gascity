@@ -195,6 +195,11 @@ func (s *Server) execSling(ctx context.Context, body slingBody, traceID string) 
 		if err := store.SetMetadata(result.BeadID, "gc.trace_id", strings.TrimSpace(traceID)); err != nil {
 			fmt.Fprintf(apiSlingStderr(), "gc api sling: setting gc.trace_id on %s: %v\n", result.BeadID, err) //nolint:errcheck
 		}
+		// WP-OBS-4: molecule.start fires here — the workflow root bead has just
+		// been created and its gc.trace_id is freshly stamped. This opens a
+		// SECOND root span (see emitMoleculeStartEvent for the trace-boundary
+		// rule: no parent_span_id; correlation is by shared trace_id only).
+		emitMoleculeStartEvent(store, result.BeadID, strings.TrimSpace(traceID))
 	}
 	if resp.WorkflowID == "" && resp.RootBeadID == "" {
 		return nil, http.StatusInternalServerError, "internal", "sling did not produce a workflow or bead id", nil

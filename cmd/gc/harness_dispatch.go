@@ -183,13 +183,20 @@ func maybeDispatchHarness(ctx context.Context, store beads.Store, bead beads.Bea
 	provider, providerID, selErr := registry.Select(ctx, reqs, allowed)
 	if selErr != nil {
 		failHarnessStepClosed(store, bead.ID, "no_provider_for_requirements", selErr.Error(), stderr)
+		emitStepFail(store, bead, "no_provider_for_requirements")
 		return harnessDispatchOutcome{Attempted: true}, fmt.Errorf("harness dispatch bead=%s: %w", bead.ID, selErr)
 	}
+
+	// WP-OBS-4: step.start fires once a provider is selected and the step is
+	// about to execute. stepStart anchors the step span's duration.
+	stepStart := time.Now()
+	emitStepStart(store, bead, providerID)
 
 	req := harnessExecutionRequestForBead(bead, cfg, cityPath, reqs)
 	resp, execErr := provider.ExecuteStep(ctx, req)
 	if execErr != nil {
 		failHarnessStepClosed(store, bead.ID, "provider_execute_failed", execErr.Error(), stderr)
+		emitStepFail(store, bead, "provider_execute_failed")
 		return harnessDispatchOutcome{Attempted: true, Selected: providerID}, fmt.Errorf("harness dispatch bead=%s provider=%s: %w", bead.ID, providerID, execErr)
 	}
 
@@ -203,9 +210,17 @@ func maybeDispatchHarness(ctx context.Context, store beads.Store, bead beads.Bea
 	if !isHarnessReleaseStep(bead) {
 		if resp.Status != harness.StatusCompleted {
 			failHarnessStepClosed(store, bead.ID, "provider_execution_not_completed", fmt.Sprintf("provider status=%s", resp.Status), stderr)
+			// WP-OBS-4: a provider deadline overrun is a distinct lifecycle event
+			// from a generic failure (step.timeout vs step.fail).
+			if resp.Status == harness.StatusTimeout {
+				emitStepTimeout(store, bead, stepStart)
+			} else {
+				emitStepFail(store, bead, fmt.Sprintf("provider_status_%s", resp.Status))
+			}
 			return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, fmt.Errorf("harness dispatch bead=%s provider=%s: provider status=%s", bead.ID, providerID, resp.Status)
 		}
 		closeHarnessStepPassed(store, bead.ID, resp, stderr)
+		emitStepComplete(store, bead, providerID, stepStart)
 		return harnessDispatchOutcome{Attempted: true, Selected: providerID, Response: &resp}, nil
 	}
 

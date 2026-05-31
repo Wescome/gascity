@@ -99,7 +99,9 @@ func TestExecCommandRunnerStopsBDSlowTimerForFastBDCommand(t *testing.T) {
 	}
 
 	oldThreshold := bdSlowTelemetryThreshold
-	bdSlowTelemetryThreshold = 30 * time.Millisecond
+	// Keep this above typical process startup jitter so the test validates
+	// timer cancellation semantics instead of host scheduling noise.
+	bdSlowTelemetryThreshold = 500 * time.Millisecond
 	t.Cleanup(func() { bdSlowTelemetryThreshold = oldThreshold })
 
 	exp := installBeadsRecordingLogExporter(t)

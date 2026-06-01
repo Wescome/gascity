@@ -1141,6 +1141,9 @@ func validDoltRuntimeState(state doltRuntimeState, cityPath string) bool {
 	if holderPID > 0 && holderPID != state.PID {
 		return false
 	}
+	if holderPID == state.PID {
+		return true
+	}
 	layout, err := resolveManagedDoltRuntimeLayout(cityPath)
 	if err != nil {
 		return false
@@ -1148,9 +1151,6 @@ func validDoltRuntimeState(state doltRuntimeState, cityPath string) bool {
 	owned, deleted := inspectManagedDoltOwnership(state.PID, layout)
 	if deleted {
 		return false
-	}
-	if holderPID == state.PID {
-		return true
 	}
 	return owned
 }

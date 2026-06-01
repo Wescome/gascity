@@ -464,8 +464,8 @@ func TestFidelityValidatorUnknownExitTreatedAsFailClosed(t *testing.T) {
 	}
 }
 
-// A missing webhook URL must not panic: the job still serializes with an empty
-// url and the script runs.
+// A missing webhook URL must not panic: the production default URL is used and
+// the script runs.
 func TestFidelityValidatorMissingWebhookURLNoPanic(t *testing.T) {
 	writeFakeFidelityScript(t, 0)
 	store := beads.NewMemStore()
@@ -485,8 +485,8 @@ func TestFidelityValidatorMissingWebhookURLNoPanic(t *testing.T) {
 
 	job := readFidelityJob(t, rigRoot)
 	webhook := job["webhook"].(map[string]any)
-	if webhook["url"] != "" {
-		t.Errorf("webhook.url = %v, want empty string", webhook["url"])
+	if webhook["url"] != "https://ff-pipeline.koales.workers.dev/webhooks/gascity" {
+		t.Errorf("webhook.url = %v, want production default URL", webhook["url"])
 	}
 	// Default key_id is v1 when none is set.
 	if webhook["key_id"] != "v1" {

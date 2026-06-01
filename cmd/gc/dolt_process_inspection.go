@@ -15,7 +15,7 @@ import (
 
 const (
 	processArgsPSTimeout = time.Second
-	lsofCommandTimeout   = 2 * time.Second
+	lsofCommandTimeout   = 200 * time.Millisecond
 )
 
 type managedDoltProcessInspection struct {

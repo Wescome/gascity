@@ -463,7 +463,9 @@ func (cr *CityRuntime) run(ctx context.Context) {
 			"phase":          "adopting_sessions",
 			"beads_provider": cr.cfg.Beads.Provider,
 		})
-		if cr.cityBeadStore() != nil {
+		if cr.cfg.Beads.Provider == "do" {
+			// DO bead store has no adoption wait path.
+		} else if cr.cityBeadStore() != nil {
 			result, passed := runAdoptionBarrier(cr.cityPath, cr.cityBeadStore(), cr.sp, cr.cfg, cr.cityName, clock.Real{}, cr.stderr, false)
 			if result.Adopted > 0 {
 				fmt.Fprintf(cr.stdout, "Adopted %d running session(s) into bead store.\n", result.Adopted) //nolint:errcheck

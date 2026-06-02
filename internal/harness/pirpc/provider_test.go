@@ -76,6 +76,9 @@ func TestExecuteStep_TranslatesRequestToWorkerInput(t *testing.T) {
 	if inputArtifacts["SeedWorkspace"] != "tarball-ref" {
 		t.Errorf("inputs → context.inputArtifacts failed: %v", inputArtifacts)
 	}
+	if ctxObj["taskText"] != "produce a patch" {
+		t.Errorf("purpose → context.taskText failed: %v", ctxObj["taskText"])
+	}
 	declared, _ := captured["declaredOutputs"].([]any)
 	if len(declared) != 1 || declared[0] != "Patch" {
 		t.Errorf("declared_outputs → declaredOutputs failed: %v", captured["declaredOutputs"])

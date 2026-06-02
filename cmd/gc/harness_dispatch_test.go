@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -192,6 +193,28 @@ func TestHarnessExecutionRequestExtractsDeclaredOutputs(t *testing.T) {
 	}
 	if req.Policy == nil || req.Policy.IsEmpty() {
 		t.Fatalf("Policy is empty")
+	}
+}
+
+func TestHarnessExecutionRequestPurposeUsesStepDescription(t *testing.T) {
+	bead := beads.Bead{
+		ID:    "gc-purpose-1",
+		Title: "Code",
+		Description: strings.Join([]string{
+			"**Expected outputs:** [\"CandidatePatch\"]",
+			"",
+			"Implement the seeded workspace issue and write CandidatePatch.",
+		}, "\n"),
+		Metadata: map[string]string{
+			"gc.root_bead_id": "gc-root",
+		},
+	}
+	req := harnessExecutionRequestForBead(bead, &config.City{}, t.TempDir(), []string{"workspace_write_scope"})
+	if !strings.Contains(req.Purpose, "Implement the seeded workspace issue") {
+		t.Fatalf("Purpose = %q, want step description content", req.Purpose)
+	}
+	if req.Purpose == bead.Title {
+		t.Fatalf("Purpose used title only, want description")
 	}
 }
 

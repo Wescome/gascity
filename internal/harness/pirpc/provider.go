@@ -126,6 +126,7 @@ type workerInput struct {
 
 type workerContext struct {
 	InputArtifacts map[string]string `json:"inputArtifacts"`
+	TaskText       string            `json:"taskText,omitempty"`
 	// Lineage pointers carried as opaque purpose-binding (AC-RQ2).
 	ContextRefs map[string]string `json:"contextRefs,omitempty"`
 }
@@ -334,6 +335,7 @@ func translateRequest(req harness.ExecutionRequest) workerInput {
 		DeclaredOutputs: req.DeclaredOutputs,
 		Context: workerContext{
 			InputArtifacts: req.Inputs,
+			TaskText:       strings.TrimSpace(req.Purpose),
 			ContextRefs: map[string]string{
 				"fn_id": req.ContextRefs.FnID,
 				"is_id": req.ContextRefs.IsID,

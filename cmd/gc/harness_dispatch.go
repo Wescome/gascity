@@ -260,7 +260,7 @@ func harnessExecutionRequestForBead(bead beads.Bead, cfg *config.City, cityPath 
 		BeadID:          bead.ID,
 		StepName:        harnessStepName(bead),
 		RoleName:        bead.Assignee,
-		Purpose:         bead.Title,
+		Purpose:         harnessPurposeForBead(bead),
 		DeclaredOutputs: declaredOutputs,
 		Inputs:          inputs,
 		RuntimeConfig:   map[string]any{},
@@ -274,6 +274,13 @@ func harnessExecutionRequestForBead(bead beads.Bead, cfg *config.City, cityPath 
 		VerifierContract: harnessVerifierContractForOutputs(declaredOutputs),
 		IdempotencyKey:   harnessIdempotencyKey(bead),
 	}
+}
+
+func harnessPurposeForBead(bead beads.Bead) string {
+	if description := strings.TrimSpace(bead.Description); description != "" {
+		return description
+	}
+	return strings.TrimSpace(bead.Title)
 }
 
 func harnessDeclaredOutputsForBead(bead beads.Bead) []string {

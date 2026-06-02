@@ -418,7 +418,7 @@ func sourceWorkflowLockScopeForStoreRef(cityPath string, cfg *config.City, defau
 func openControlStoreAtForCity(storePath, cityPath string, cfg *config.City) (beads.Store, error) {
 	scopeRoot := resolveStoreScopeRoot(cityPath, storePath)
 	provider := rawBeadsProviderForScope(scopeRoot, cityPath)
-	if provider == "file" || strings.HasPrefix(provider, "exec:") {
+	if provider == "file" || provider == "do" || strings.HasPrefix(provider, "exec:") {
 		return openStoreAtForCity(storePath, cityPath)
 	}
 	if samePath(scopeRoot, cityPath) {

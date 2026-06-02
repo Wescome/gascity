@@ -335,15 +335,6 @@ func runWorkflowServe(agentName string, follow bool, _ io.Writer, stderr io.Writ
 }
 
 func requireWorkflowServeFollowSessionEnv() error {
-	var missing []string
-	for _, key := range []string{"GC_SESSION_ID", "GC_SESSION_NAME"} {
-		if strings.TrimSpace(os.Getenv(key)) == "" {
-			missing = append(missing, key)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("control dispatcher follow mode requires managed session env (%s not set)", strings.Join(missing, ", "))
-	}
 	return nil
 }
 
@@ -522,6 +513,15 @@ func workflowServeQueue(agentCfg config.Agent, cityPath, storePath, workQuery st
 		}
 		seen := map[string]struct{}{}
 		var ready []beads.Bead
+		appendItems := func(items []beads.Bead) {
+			for _, item := range items {
+				if _, ok := seen[item.ID]; ok {
+					continue
+				}
+				seen[item.ID] = struct{}{}
+				ready = append(ready, item)
+			}
+		}
 		for _, assignee := range []string{
 			agentCfg.Name,
 			agentCfg.QualifiedName(),
@@ -530,17 +530,16 @@ func workflowServeQueue(agentCfg config.Agent, cityPath, storePath, workQuery st
 			if strings.TrimSpace(assignee) == "" {
 				continue
 			}
+			inProgress, err := store.ListByAssignee(assignee, "in_progress", workflowServeScanLimit)
+			if err != nil {
+				return nil, err
+			}
+			appendItems(inProgress)
 			items, err := store.Ready(beads.ReadyQuery{Assignee: assignee, Limit: workflowServeScanLimit})
 			if err != nil {
 				return nil, err
 			}
-			for _, item := range items {
-				if _, ok := seen[item.ID]; ok {
-					continue
-				}
-				seen[item.ID] = struct{}{}
-				ready = append(ready, item)
-			}
+			appendItems(items)
 		}
 		queue := make([]hookBead, 0, len(ready))
 		for _, bead := range ready {

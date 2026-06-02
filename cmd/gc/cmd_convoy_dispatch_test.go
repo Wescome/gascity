@@ -1478,24 +1478,8 @@ func TestRunWorkflowServeDrainsReadyBatchBeforeRequery(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowServeFollowRequiresManagedSessionEnv(t *testing.T) {
+func TestRunWorkflowServeFollowAllowsHeadlessControlDispatcher(t *testing.T) {
 	clearGCEnv(t)
-	t.Setenv("GC_TEMPLATE", "")
-
-	err := runWorkflowServe("control-dispatcher", true, io.Discard, io.Discard)
-	if err == nil {
-		t.Fatal("runWorkflowServe returned nil error, want missing managed session env")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "GC_SESSION_ID") || !strings.Contains(msg, "GC_SESSION_NAME") {
-		t.Fatalf("runWorkflowServe error = %q, want missing GC_SESSION_ID and GC_SESSION_NAME", msg)
-	}
-}
-
-func TestRequireWorkflowServeFollowSessionEnvAllowsManagedSession(t *testing.T) {
-	clearGCEnv(t)
-	t.Setenv("GC_SESSION_ID", "sess-123")
-	t.Setenv("GC_SESSION_NAME", "test-city/control-dispatcher")
 
 	if err := requireWorkflowServeFollowSessionEnv(); err != nil {
 		t.Fatalf("requireWorkflowServeFollowSessionEnv: %v", err)
@@ -2796,6 +2780,38 @@ func TestWorkflowServeQueueIncludesRawControlDispatcherAssignee(t *testing.T) {
 	}
 }
 
+func TestWorkflowServeQueueIncludesInProgressControlDispatcherRuntimeWork(t *testing.T) {
+	clearGCEnv(t)
+	disableManagedDoltRecoveryForTest(t)
+	cityDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte("[workspace]\nname = \"factory\"\n\n[beads]\nprovider = \"file\"\n"), 0o644); err != nil {
+		t.Fatalf("write city.toml: %v", err)
+	}
+	store, err := openStoreAtForCity(cityDir, cityDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	bead, err := store.Create(beads.Bead{
+		Title:    "Plan",
+		Status:   "in_progress",
+		Assignee: config.ControlDispatcherAgentName,
+		Metadata: map[string]string{
+			"gc.runtime_requirements": "ai_reasoning",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create bead: %v", err)
+	}
+
+	queue, err := workflowServeQueue(config.Agent{Name: config.ControlDispatcherAgentName}, cityDir, cityDir, "", nil)
+	if err != nil {
+		t.Fatalf("workflowServeQueue: %v", err)
+	}
+	if len(queue) != 1 || queue[0].ID != bead.ID {
+		t.Fatalf("queue = %#v, want in-progress control-dispatcher bead %s", queue, bead.ID)
+	}
+}
+
 func TestOpenControlStoreDisablesAutoExportWithoutSandboxingWrites(t *testing.T) {
 	clearGCEnv(t)
 	disableManagedDoltRecoveryForTest(t)
@@ -2917,6 +2933,40 @@ func TestOpenControlStoreAtForCityPreservesFileAndExecProviderStores(t *testing.
 		}
 		if got := env["GC_STORE_SCOPE"]; got != "rig" {
 			t.Fatalf("exec GC_STORE_SCOPE = %q, want rig", got)
+		}
+	})
+
+	t.Run("do", func(t *testing.T) {
+		t.Setenv("GC_BEADS", "")
+		t.Setenv("GC_BEADS_SCOPE_ROOT", "")
+		t.Setenv("TEST_DO_URL", "https://example.invalid/internal/bead-store/factory")
+		t.Setenv("TEST_DO_TOKEN", "test-token")
+		if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(`
+[workspace]
+name = "metro-city"
+prefix = "ct"
+
+[beads]
+provider = "do"
+
+[beads.do]
+url_env = "TEST_DO_URL"
+token_env = "TEST_DO_TOKEN"
+
+[[rig]]
+name = "frontend"
+path = "rigs/frontend"
+prefix = "fe"
+`), 0o644); err != nil {
+			t.Fatalf("write city.toml: %v", err)
+		}
+
+		store, err := openControlStoreAtForCity(cityDir, cityDir, cfg)
+		if err != nil {
+			t.Fatalf("openControlStoreAtForCity(do): %v", err)
+		}
+		if _, ok := store.(*beads.DoStore); !ok {
+			t.Fatalf("control store = %T, want *beads.DoStore for do provider", store)
 		}
 	})
 }

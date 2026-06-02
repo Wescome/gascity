@@ -225,6 +225,17 @@ func TestFidelityValidatorLineageFallsBackToDescription(t *testing.T) {
 	}
 }
 
+func TestFidelityJobUsesSourceBeadIDForFactoryWebhookAnchor(t *testing.T) {
+	bead := fidelityTestBead(t)
+	bead.ID = "gc-release-step"
+	bead.Metadata["gc.source_bead_id"] = "gc-dispatch-root"
+
+	job := buildFidelityJob(beads.NewMemStore(), bead, harness.ExecutionResponse{Status: harness.StatusCompleted})
+	if job.Lineage.BeadID != "gc-dispatch-root" {
+		t.Fatalf("Lineage.BeadID = %q, want source dispatch bead id", job.Lineage.BeadID)
+	}
+}
+
 // PriorStepVerdicts accumulates the serialized responses stamped on sibling
 // beads sharing a gc.root_bead_id, excluding the Release step itself.
 func TestFidelityPriorStepVerdictsAccumulatesSiblings(t *testing.T) {

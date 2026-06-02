@@ -1481,7 +1481,36 @@ func TestRunWorkflowServeDrainsReadyBatchBeforeRequery(t *testing.T) {
 func TestRunWorkflowServeFollowAllowsHeadlessControlDispatcher(t *testing.T) {
 	clearGCEnv(t)
 
-	if err := requireWorkflowServeFollowSessionEnv(); err != nil {
+	if err := requireWorkflowServeFollowSessionEnv(""); err != nil {
+		t.Fatalf("requireWorkflowServeFollowSessionEnv: %v", err)
+	}
+}
+
+func TestRunWorkflowServeFollowAllowsHeadlessQualifiedControlDispatcher(t *testing.T) {
+	clearGCEnv(t)
+
+	if err := requireWorkflowServeFollowSessionEnv("factory/control-dispatcher"); err != nil {
+		t.Fatalf("requireWorkflowServeFollowSessionEnv: %v", err)
+	}
+}
+
+func TestRunWorkflowServeFollowRejectsHeadlessNonControlDispatcher(t *testing.T) {
+	clearGCEnv(t)
+
+	err := requireWorkflowServeFollowSessionEnv("coder")
+	if err == nil {
+		t.Fatal("requireWorkflowServeFollowSessionEnv returned nil, want session-context error")
+	}
+	if !strings.Contains(err.Error(), "requires session context") {
+		t.Fatalf("error = %q, want session context message", err)
+	}
+}
+
+func TestRunWorkflowServeFollowAllowsSessionContextForNonControlDispatcher(t *testing.T) {
+	clearGCEnv(t)
+	t.Setenv("GC_SESSION_NAME", "factory--coder")
+
+	if err := requireWorkflowServeFollowSessionEnv("coder"); err != nil {
 		t.Fatalf("requireWorkflowServeFollowSessionEnv: %v", err)
 	}
 }

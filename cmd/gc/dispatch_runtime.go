@@ -276,12 +276,6 @@ func runWorkflowServe(agentName string, follow bool, _ io.Writer, stderr io.Writ
 	restoreTraceWarnings := useWorkflowTraceWarnings(stderr)
 	defer restoreTraceWarnings()
 
-	if follow {
-		if err := requireWorkflowServeFollowSessionEnv(); err != nil {
-			return err
-		}
-	}
-
 	cityPath, err := resolveCity()
 	if err != nil {
 		return err
@@ -309,6 +303,11 @@ func runWorkflowServe(agentName string, follow bool, _ io.Writer, stderr io.Writ
 	if agentName == "" {
 		agentName = config.ControlDispatcherAgentName
 	}
+	if follow {
+		if err := requireWorkflowServeFollowSessionEnv(agentName); err != nil {
+			return err
+		}
+	}
 	agentCfg, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
 	if !ok {
 		return fmt.Errorf("agent %q not found in config", agentName)
@@ -334,8 +333,23 @@ func runWorkflowServe(agentName string, follow bool, _ io.Writer, stderr io.Writ
 	return runWorkflowServeFollow(agentCfg, cityPath, workDir, workQuery, workEnv, stderr)
 }
 
-func requireWorkflowServeFollowSessionEnv() error {
-	return nil
+func requireWorkflowServeFollowSessionEnv(agentName string) error {
+	if isWorkflowServeControlDispatcherName(agentName) {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv("GC_SESSION_NAME")) != "" ||
+		strings.TrimSpace(os.Getenv("GC_SESSION_ID")) != "" {
+		return nil
+	}
+	return fmt.Errorf("gc convoy control --serve --follow %s requires session context (GC_SESSION_NAME or GC_SESSION_ID)", agentName)
+}
+
+func isWorkflowServeControlDispatcherName(agentName string) bool {
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" || agentName == config.ControlDispatcherAgentName {
+		return true
+	}
+	return strings.HasSuffix(agentName, "/"+config.ControlDispatcherAgentName)
 }
 
 func legacyWorkflowTracePaths(cityPath string, rigs []config.Rig) []string {

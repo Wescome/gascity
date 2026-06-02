@@ -221,7 +221,7 @@ func buildFidelityJob(store beads.Store, bead beads.Bead, resp harness.Execution
 			EpID:           lineage.EpID,
 			FormID:         lineage.FormID,
 			FactoryAttempt: lineage.FactoryAttempt,
-			BeadID:         bead.ID,
+			BeadID:         fidelityWebhookBeadID(bead),
 		},
 		DeclaredOutputs:   harnessDeclaredOutputsForBead(bead),
 		PriorStepVerdicts: fidelityPriorStepVerdicts(store, bead, os.Stderr),
@@ -235,6 +235,13 @@ func buildFidelityJob(store beads.Store, bead beads.Bead, resp harness.Execution
 			KeyID:      webhookHmacKeyid(bead),
 		},
 	}
+}
+
+func fidelityWebhookBeadID(bead beads.Bead) string {
+	if sourceBeadID := strings.TrimSpace(bead.Metadata["gc.source_bead_id"]); sourceBeadID != "" {
+		return sourceBeadID
+	}
+	return bead.ID
 }
 
 // fidelityPriorStepVerdicts accumulates the serialized provider responses

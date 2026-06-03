@@ -122,6 +122,11 @@ type workerInput struct {
 	ModelCandidates  []string         `json:"modelCandidates,omitempty"`
 	MaxRepairRounds  *int             `json:"maxRepairRounds,omitempty"`
 	ExecutionSurface string           `json:"executionSurface,omitempty"`
+	Execution        *workerExecution `json:"execution,omitempty"`
+}
+
+type workerExecution struct {
+	AuthoringMode string `json:"authoringMode,omitempty"`
 }
 
 type workerContext struct {
@@ -364,7 +369,19 @@ func translateRequest(req harness.ExecutionRequest) workerInput {
 	if v, ok := stringField(req.RuntimeConfig, "execution_surface"); ok {
 		in.ExecutionSurface = v
 	}
+	if req.Policy != nil && containsString(req.Policy.FilesystemScope, "/workspace") {
+		in.Execution = &workerExecution{AuthoringMode: "autonomous_filesystem"}
+	}
 	return in
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // translateResponse decomposes the container observation into envelope fields

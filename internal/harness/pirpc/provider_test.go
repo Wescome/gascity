@@ -86,6 +86,10 @@ func TestExecuteStep_TranslatesRequestToWorkerInput(t *testing.T) {
 	if _, ok := captured["outputContracts"]; !ok {
 		t.Errorf("verifier_contract → outputContracts missing")
 	}
+	execution, _ := captured["execution"].(map[string]any)
+	if execution["authoringMode"] != "autonomous_filesystem" {
+		t.Errorf("filesystem_scope /workspace should set execution.authoringMode=autonomous_filesystem, got %v", execution["authoringMode"])
+	}
 }
 
 // AC-PI2 / AC-RS6: observation.totalUsage maps to model_usage.
